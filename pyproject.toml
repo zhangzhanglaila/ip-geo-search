@@ -1,0 +1,20 @@
+[project]
+name = "ip-geo-search"
+version = "0.1.0"
+description = "Offline IP geolocation search over ip2region, ip-location-db, and optional GeoIP2 MMDB files."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+geoip2 = ["geoip2>=5.0.0"]
+
+[project.scripts]
+ip-geo-search = "ipgeosearch.cli:main"
+ip-geo-search-server = "ipgeosearch.server:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
