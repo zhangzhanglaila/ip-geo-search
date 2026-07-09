@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>IPGeoSearch</title>
+    <link
+      rel="stylesheet"
+      href="/static/vendor/maplibre-gl/maplibre-gl.css"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar">
+        <div class="brand">
+          <span class="logo-mark">IP</span>
+          <div>
+            <h1>IPGeoSearch</h1>
+            <p>IP geolocation search and map view</p>
+          </div>
+        </div>
+
+        <form class="search-box" id="searchForm">
+          <input
+            id="ipInput"
+            name="ip"
+            autocomplete="off"
+            spellcheck="false"
+            value="8.8.8.8"
+            aria-label="IP address"
+            placeholder="Enter IPv4 or IPv6"
+          />
+          <button type="submit">Search</button>
+        </form>
+      </section>
+
+      <section class="workspace">
+        <section class="map-card">
+          <div class="card-head">
+            <div>
+              <span class="mini-label">Live map</span>
+              <h2 id="mapTitle">Ready</h2>
+            </div>
+            <strong id="statusPill">Idle</strong>
+          </div>
+
+          <div class="map-stage" aria-label="IP location map">
+            <div id="mapCanvas" class="online-map"></div>
+            <div class="map-badge" id="mapNote">Search an IP to locate it on the map.</div>
+          </div>
+        </section>
+
+        <aside class="info-panel">
+          <div class="main-result">
+            <span class="mini-label">Lookup result</span>
+            <h2 id="summaryTitle">No lookup yet</h2>
+            <p id="summaryText">Enter an IP address to view location and network details.</p>
+          </div>
+
+          <div class="metric-grid">
+            <article>
+              <span>Version</span>
+              <strong id="versionValue">-</strong>
+            </article>
+            <article>
+              <span>Country</span>
+              <strong id="countryValue">-</strong>
+            </article>
+            <article>
+              <span>Network</span>
+              <strong id="networkValue">-</strong>
+            </article>
+            <article>
+              <span>Coordinates</span>
+              <strong id="coordValue">-</strong>
+            </article>
+          </div>
+
+          <div class="detail-card">
+            <h3>Details</h3>
+            <dl id="detailList">
+              <div><dt>IP</dt><dd>-</dd></div>
+              <div><dt>Place</dt><dd>-</dd></div>
+              <div><dt>ASN</dt><dd>-</dd></div>
+              <div><dt>Carrier</dt><dd>-</dd></div>
+            </dl>
+          </div>
+        </aside>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

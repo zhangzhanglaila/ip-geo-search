@@ -35,7 +35,7 @@ class GeoIp2Adapter:
                     return SourceResult(
                         source="geoip2",
                         ok=True,
-                        data={"method": method, "record": self._to_plain(response)},
+                        data={"method": method, "record": self._to_plain(response, max_depth=4)},
                     )
                 except Exception:
                     continue
@@ -64,19 +64,21 @@ class GeoIp2Adapter:
         self._reader = geoip2.database.Reader(str(self.mmdb_path))
         return self._reader
 
-    def _to_plain(self, value: Any) -> Any:
+    def _to_plain(self, value: Any, max_depth: int = 3) -> Any:
         if value is None:
             return None
         if isinstance(value, (str, int, float, bool)):
             return value
         if isinstance(value, (list, tuple)):
-            return [self._to_plain(item) for item in value]
+            return [self._to_plain(item, max_depth - 1) for item in value]
         if isinstance(value, dict):
-            return {str(key): self._to_plain(item) for key, item in value.items()}
+            return {str(key): self._to_plain(item, max_depth - 1) for key, item in value.items()}
+        if max_depth <= 0:
+            return None
 
         attrs = {}
         for name in dir(value):
-            if name.startswith("_"):
+            if name.startswith("_") or name in {"raw", "locales"}:
                 continue
             try:
                 item = getattr(value, name)
@@ -84,6 +86,7 @@ class GeoIp2Adapter:
                 continue
             if callable(item):
                 continue
-            if isinstance(item, (str, int, float, bool, dict, list, tuple)) or item is None:
-                attrs[name] = self._to_plain(item)
+            plain = self._to_plain(item, max_depth - 1)
+            if plain not in ({}, [], None):
+                attrs[name] = plain
         return attrs

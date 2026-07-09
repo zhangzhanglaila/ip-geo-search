@@ -14,7 +14,7 @@ IPGeoSearch 是一个离线 IP 地理搜索工具，整合 `ip2region`、`ip-loc
 - IPv4 and IPv6 support.
 - CLI query tool.
 - Lightweight HTTP API.
-- Map visualization ready: the API output can be used by a frontend map view.
+- Web page with offline map display for IP search and location markers.
 
 ## Data Sources / 数据源
 
@@ -56,6 +56,33 @@ python lookup.py --list-csv
 Start the API server:
 
 ```powershell
+python api.py --host 127.0.0.1 --port 8787
+```
+
+Open the web page:
+
+```text
+http://127.0.0.1:8787/
+```
+
+By default, the web page uses the local offline vector map from:
+
+```text
+D:\iPhotron-LocalPhotoAlbumManager\src\maps
+```
+
+You can point IPGeoSearch to another compatible MapLibre vector tile directory:
+
+```powershell
+$env:IPGEOSEARCH_OFFLINE_MAP_ROOT="D:\path\to\maps"
+python api.py --host 127.0.0.1 --port 8787
+```
+
+If the offline map directory is unavailable, the web page falls back to OpenStreetMap. To use Amap instead, set an Amap Web JS API key before starting the server:
+
+```powershell
+$env:MAP_PROVIDER="amap"
+$env:AMAP_WEB_KEY="your-amap-web-js-api-key"
 python api.py --host 127.0.0.1 --port 8787
 ```
 
@@ -127,11 +154,12 @@ $env:IP2REGION_ROOT="D:\ip\ip2region"
 $env:IP_LOCATION_DB_ROOT="D:\ip\ip-location-db"
 $env:GEOIP2_PYTHON_ROOT="D:\ip\GeoIP2-python"
 $env:GEOIP2_MMDB="D:\data\GeoLite2-City.mmdb"
+$env:IPGEOSEARCH_OFFLINE_MAP_ROOT="D:\iPhotron-LocalPhotoAlbumManager\src\maps"
 ```
 
 ## Roadmap / 规划
 
-- Web map dashboard for IP search results.
+- More precise map markers when city-level latitude and longitude are available.
 - Batch IP lookup.
 - Export results to CSV and JSON.
 - More source comparison views.
