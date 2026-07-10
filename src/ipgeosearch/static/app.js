@@ -1,5 +1,14 @@
 const form = document.querySelector("#searchForm");
 const ipInput = document.querySelector("#ipInput");
+const singleModeButton = document.querySelector("#singleModeButton");
+const batchModeButton = document.querySelector("#batchModeButton");
+const multiTools = document.querySelector("#multiTools");
+const batchInput = document.querySelector("#batchInput");
+const batchButton = document.querySelector("#batchButton");
+const clearBatchButton = document.querySelector("#clearBatchButton");
+const copyBatchButton = document.querySelector("#copyBatchButton");
+const batchResults = document.querySelector("#batchResults");
+const historyList = document.querySelector("#historyList");
 const ipv4Value = document.querySelector("#ipv4Value");
 const ipv6Value = document.querySelector("#ipv6Value");
 const basicIp = document.querySelector("#basicIp");
@@ -13,6 +22,9 @@ const riskNeedle = document.querySelector("#riskNeedle");
 const riskSummary = document.querySelector("#riskSummary");
 const analysisBody = document.querySelector("#analysisBody");
 const mapNote = document.querySelector("#mapNote");
+
+const HISTORY_KEY = "ipgeosearch.history";
+const MAX_HISTORY = 8;
 
 const COUNTRY_CENTROIDS = {
   US: { lat: 39.5, lon: -98.35, label: "United States" },
@@ -32,40 +44,134 @@ const COUNTRY_CENTROIDS = {
 };
 
 const state = {
+  mode: "single",
   map: null,
   marker: null,
+  markerLayer: null,
   chinaCoordinates: new Map(),
   chinaCoordinatesReady: null,
-  mapReady: null
+  mapReady: null,
+  lastBatchRows: []
 };
 
 state.chinaCoordinatesReady = loadChinaCoordinates();
 state.mapReady = initMap();
 renderAnalysis();
+renderHistory();
+
+singleModeButton.addEventListener("click", () => setMode("single"));
+batchModeButton.addEventListener("click", () => setMode("batch"));
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const ip = ipInput.value.trim();
   if (!ip) return;
 
+  const requestMode = state.mode;
   form.querySelector("button").disabled = true;
   mapNote.textContent = "正在查询 IP 信息...";
   try {
-    const response = await fetch(`/lookup?ip=${encodeURIComponent(ip)}`);
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "查询失败");
+    const { payload, data } = await lookupIp(ip);
     await Promise.all([state.chinaCoordinatesReady, state.mapReady]);
-    render(payload);
+    if (requestMode !== state.mode) return;
+    render(payload, data);
+    addHistory(data);
   } catch (error) {
+    if (requestMode !== state.mode) return;
     renderError(error);
   } finally {
     form.querySelector("button").disabled = false;
   }
 });
 
-window.addEventListener("load", () => {
+batchButton.addEventListener("click", runBatchLookup);
+
+clearBatchButton.addEventListener("click", () => {
+  batchInput.value = "";
+  state.lastBatchRows = [];
+  renderBatchResults([]);
+});
+
+copyBatchButton.addEventListener("click", async () => {
+  const text = state.lastBatchRows
+    .map((row) => [row.ip, row.location || row.error || "-", row.coords || "-"].join("\t"))
+    .join("\n");
+  await copyText(text || "暂无批量结果", copyBatchButton);
+});
+
+document.querySelectorAll(".copy-button").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const target = document.querySelector(`#${button.dataset.copyTarget}`);
+    await copyText(target?.textContent?.trim() || "", button);
+  });
+});
+
+historyList.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-ip]");
+  if (!button) return;
+  ipInput.value = button.dataset.ip;
   form.requestSubmit();
 });
+
+window.addEventListener("load", () => {
+  setMode("single");
+  form.requestSubmit();
+});
+
+function setMode(mode) {
+  const isBatch = mode === "batch";
+  state.mode = isBatch ? "batch" : "single";
+  multiTools.classList.toggle("is-hidden", !isBatch);
+  singleModeButton.classList.toggle("active", !isBatch);
+  batchModeButton.classList.toggle("active", isBatch);
+  singleModeButton.setAttribute("aria-selected", String(!isBatch));
+  batchModeButton.setAttribute("aria-selected", String(isBatch));
+  if (isBatch) {
+    window.setTimeout(() => batchInput.focus(), 0);
+  } else {
+    window.setTimeout(() => ipInput.focus(), 0);
+  }
+}
+
+async function lookupIp(ip) {
+  const response = await fetch(`/lookup?ip=${encodeURIComponent(ip)}`);
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || "查询失败");
+  await state.chinaCoordinatesReady;
+  return { payload, data: normalize(payload) };
+}
+
+async function runBatchLookup() {
+  const ips = uniqueItems(batchInput.value.split(/[\s,，;；]+/).map((item) => item.trim()).filter(Boolean)).slice(0, 30);
+  if (!ips.length) {
+    renderBatchResults([]);
+    mapNote.textContent = "请输入要批量查询的 IP。";
+    return;
+  }
+
+  batchButton.disabled = true;
+  mapNote.textContent = `正在批量查询 ${ips.length} 个 IP...`;
+  renderBatchResults(ips.map((ip) => ({ ip, loading: true })));
+  try {
+    await Promise.all([state.chinaCoordinatesReady, state.mapReady]);
+    const rows = await Promise.all(ips.map(async (ip) => {
+      try {
+        const { data } = await lookupIp(ip);
+        return toBatchRow(ip, data);
+      } catch (error) {
+        return { ip, error: error.message };
+      }
+    }));
+    state.lastBatchRows = rows;
+    renderBatchResults(rows);
+    updateMapMany(rows.filter((row) => row.position));
+    rows.filter((row) => !row.error).forEach(addHistory);
+    const located = rows.filter((row) => row.position).length;
+    mapNote.textContent = `批量查询完成：${rows.length} 个 IP，${located} 个已定位到地图。`;
+  } finally {
+    batchButton.disabled = false;
+  }
+}
 
 async function initMap() {
   try {
@@ -82,14 +188,14 @@ async function initMap() {
       minZoom: 3,
       maxZoom: 18
     }).addTo(state.map);
+    state.markerLayer = L.layerGroup().addTo(state.map);
     mapNote.textContent = "查询 IP 后在地图中定位。";
   } catch (error) {
     mapNote.textContent = `地图加载失败：${error.message}`;
   }
 }
 
-function render(payload) {
-  const data = normalize(payload);
+function render(payload, data) {
   ipv4Value.textContent = payload.ip_version === 4 ? payload.ip : "-";
   ipv6Value.textContent = payload.ip_version === 6 ? payload.ip : "未检测到 IPv6";
   basicIp.textContent = payload.ip;
@@ -118,16 +224,68 @@ function renderError(error) {
   mapNote.textContent = error.message;
 }
 
+function renderBatchResults(rows) {
+  if (!rows.length) {
+    batchResults.innerHTML = "";
+    return;
+  }
+  batchResults.innerHTML = rows.map((row) => {
+    if (row.loading) {
+      return `<div class="batch-row"><strong>${escapeHtml(row.ip)}</strong><span>查询中...</span><span>-</span></div>`;
+    }
+    if (row.error) {
+      return `<div class="batch-row error"><strong>${escapeHtml(row.ip)}</strong><span>${escapeHtml(row.error)}</span><span>-</span></div>`;
+    }
+    return `
+      <div class="batch-row">
+        <strong>${escapeHtml(row.ip)}</strong>
+        <span>${escapeHtml(row.location || "-")}</span>
+        <span>${escapeHtml(row.coords || "-")}</span>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderHistory() {
+  const rows = readHistory();
+  if (!rows.length) {
+    historyList.innerHTML = `<div class="history-empty">暂无查询历史</div>`;
+    return;
+  }
+  historyList.innerHTML = rows.map((row) => `
+    <button type="button" data-ip="${escapeHtml(row.ip)}">
+      <strong>${escapeHtml(row.ip)}</strong>
+      <span>${escapeHtml(row.location || "-")}</span>
+      <span>${escapeHtml(row.coords || "-")}</span>
+    </button>
+  `).join("");
+}
+
 function updateMap(lat, lon, label) {
   if (!state.map || !window.L) return;
+  state.markerLayer?.clearLayers();
   const position = [lat, lon];
-  if (!state.marker) {
-    state.marker = L.marker(position).addTo(state.map);
-  } else {
-    state.marker.setLatLng(position);
-  }
+  state.marker = L.marker(position).addTo(state.markerLayer || state.map);
   state.marker.bindPopup(label).openPopup();
   state.map.setView(position, 8);
+}
+
+function updateMapMany(rows) {
+  if (!state.map || !window.L || !rows.length) return;
+  state.markerLayer?.clearLayers();
+  const bounds = [];
+  for (const row of rows) {
+    const position = [row.position.lat, row.position.lon];
+    bounds.push(position);
+    L.marker(position)
+      .addTo(state.markerLayer || state.map)
+      .bindPopup(`${escapeHtml(row.ip)}<br>${escapeHtml(row.location || "-")}`);
+  }
+  if (bounds.length === 1) {
+    state.map.setView(bounds[0], 8);
+  } else {
+    state.map.fitBounds(bounds, { padding: [40, 40], maxZoom: 8 });
+  }
 }
 
 function normalize(payload) {
@@ -152,6 +310,7 @@ function normalize(payload) {
   const locationDetail = [location, carrier].filter(Boolean).join("/");
 
   return {
+    ip: payload.ip,
     location,
     locationDetail,
     isp,
@@ -160,9 +319,19 @@ function normalize(payload) {
     countryCode,
     countryName: centroid?.label || country,
     position,
+    coords: position ? `${position.lon.toFixed(6)}, ${position.lat.toFixed(6)}` : "",
     mapLabel: position
       ? `${locationDetail || countryCode || "IP"} - ${coordinates ? "精确坐标" : chinaCoordinate ? "城市级坐标" : "国家级坐标"}`
       : "无坐标"
+  };
+}
+
+function toBatchRow(ip, data) {
+  return {
+    ip,
+    location: data.locationDetail || data.location || data.countryName || "-",
+    coords: data.coords || "",
+    position: data.position || null
   };
 }
 
@@ -194,6 +363,55 @@ function renderAnalysis(data = {}) {
 
 function statusPill(value) {
   return `<span class="pill${value === "无" ? " gray" : ""}">${escapeHtml(value)}</span>`;
+}
+
+function addHistory(data) {
+  const row = {
+    ip: data.ip || data.ipAddress || "",
+    location: data.locationDetail || data.location || "-",
+    coords: data.coords || ""
+  };
+  if (!row.ip) return;
+  const rows = readHistory().filter((item) => item.ip !== row.ip);
+  rows.unshift(row);
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(rows.slice(0, MAX_HISTORY)));
+  renderHistory();
+}
+
+function readHistory() {
+  try {
+    const rows = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+async function copyText(text, button) {
+  if (!text || text === "-") return;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    textarea.remove();
+  }
+  const oldText = button.textContent;
+  button.textContent = "已复制";
+  button.classList.add("copied");
+  window.setTimeout(() => {
+    button.textContent = oldText;
+    button.classList.remove("copied");
+  }, 1200);
+}
+
+function uniqueItems(items) {
+  return [...new Set(items)];
 }
 
 function clean(value) {

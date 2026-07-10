@@ -31,6 +31,10 @@
         </div>
         <h1>IP地址查询</h1>
         <p>快速查询 IP 地址的详细信息和风险评估</p>
+        <div class="mode-switch" role="tablist" aria-label="查询模式">
+          <button type="button" class="active" id="singleModeButton" aria-selected="true">单个查询</button>
+          <button type="button" id="batchModeButton" aria-selected="false">多个查询</button>
+        </div>
         <form class="search-box" id="searchForm">
           <input
             id="ipInput"
@@ -43,6 +47,36 @@
           />
           <button type="submit">立即查询</button>
         </form>
+      </section>
+
+      <section class="utility-grid is-hidden" id="multiTools">
+        <article class="tool-panel">
+          <header>
+            <span>●</span>
+            <h2>批量查询</h2>
+          </header>
+          <div class="batch-box">
+            <textarea
+              id="batchInput"
+              spellcheck="false"
+              placeholder="每行一个 IP，例如：&#10;117.151.83.202&#10;8.8.8.8"
+            ></textarea>
+            <div class="tool-actions">
+              <button type="button" id="batchButton">批量定位</button>
+              <button type="button" id="clearBatchButton">清空</button>
+              <button type="button" id="copyBatchButton">复制结果</button>
+            </div>
+            <div class="batch-results" id="batchResults" aria-live="polite"></div>
+          </div>
+        </article>
+
+        <article class="tool-panel">
+          <header>
+            <span>●</span>
+            <h2>查询历史</h2>
+          </header>
+          <div class="history-list" id="historyList" aria-live="polite"></div>
+        </article>
       </section>
 
       <section class="ip-cards">
@@ -61,12 +95,12 @@
       <section class="panel">
         <header><span>●</span><h2>基础信息</h2></header>
         <div class="info-grid">
-          <div><span>IP 地址</span><strong id="basicIp">-</strong></div>
-          <div><span>地理位置</span><strong id="basicLocation">-</strong></div>
-          <div><span>ASN</span><strong id="basicAsn">-</strong></div>
-          <div><span>运营商</span><strong id="basicIsp">-</strong></div>
-          <div><span>经纬度</span><strong id="basicCoords">-</strong></div>
-          <div><span>广播 IP</span><strong id="basicBroadcast">N/A</strong></div>
+          <div><span>IP 地址</span><strong id="basicIp">-</strong><button type="button" class="copy-button" data-copy-target="basicIp">复制</button></div>
+          <div><span>地理位置</span><strong id="basicLocation">-</strong><button type="button" class="copy-button" data-copy-target="basicLocation">复制</button></div>
+          <div><span>ASN</span><strong id="basicAsn">-</strong><button type="button" class="copy-button" data-copy-target="basicAsn">复制</button></div>
+          <div><span>运营商</span><strong id="basicIsp">-</strong><button type="button" class="copy-button" data-copy-target="basicIsp">复制</button></div>
+          <div><span>经纬度</span><strong id="basicCoords">-</strong><button type="button" class="copy-button" data-copy-target="basicCoords">复制</button></div>
+          <div><span>广播 IP</span><strong id="basicBroadcast">N/A</strong><button type="button" class="copy-button" data-copy-target="basicBroadcast">复制</button></div>
         </div>
 
         <div class="risk-card">

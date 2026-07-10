@@ -172,12 +172,42 @@ body {
 
 .hero p {
   max-width: 100%;
-  margin: 18px 0 34px;
+  margin: 18px 0 22px;
   color: var(--muted);
   font-size: 18px;
   font-weight: 750;
   line-height: 1.6;
   overflow-wrap: anywhere;
+}
+
+.mode-switch {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(110px, 1fr));
+  gap: 0;
+  margin-bottom: 26px;
+  border: 3px solid var(--outline);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 5px 5px 0 rgba(38, 50, 79, 0.16);
+}
+
+.mode-switch button {
+  min-height: 42px;
+  border: 0;
+  color: var(--outline);
+  background: #fff;
+  font: inherit;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.mode-switch button + button {
+  border-left: 3px solid var(--outline);
+}
+
+.mode-switch button.active {
+  background: var(--yellow);
 }
 
 .search-box {
@@ -218,6 +248,158 @@ body {
 .search-box button:disabled {
   cursor: wait;
   filter: saturate(0.7);
+}
+
+.utility-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  gap: 22px;
+  margin-bottom: 28px;
+}
+
+.utility-grid.is-hidden {
+  display: none;
+}
+
+.tool-panel {
+  overflow: hidden;
+  border: 3px solid var(--outline);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.tool-panel header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 0 20px;
+  color: var(--outline);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.34) 25%, transparent 25%) 0 0 / 18px 18px,
+    var(--yellow);
+  border-bottom: 3px solid var(--outline);
+}
+
+.tool-panel header span {
+  color: var(--pink);
+  text-shadow: 2px 2px 0 #fff;
+}
+
+.tool-panel h2 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: 0;
+}
+
+.batch-box,
+.history-list {
+  padding: 18px;
+}
+
+.batch-box textarea {
+  display: block;
+  width: 100%;
+  min-height: 118px;
+  resize: vertical;
+  padding: 14px;
+  border: 2px solid var(--outline);
+  border-radius: 8px;
+  color: var(--ink);
+  background: #fff;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.tool-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.tool-actions button,
+.copy-button,
+.history-list button {
+  border: 2px solid var(--outline);
+  border-radius: 8px;
+  color: var(--outline);
+  background: #fff;
+  font: inherit;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.tool-actions button {
+  min-height: 38px;
+  padding: 0 14px;
+}
+
+.tool-actions button:first-child {
+  background: var(--yellow);
+}
+
+.batch-results {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.batch-row {
+  display: grid;
+  grid-template-columns: minmax(96px, 0.75fr) minmax(0, 1.45fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 46px;
+  padding: 10px 12px;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.history-list button {
+  display: grid;
+  grid-template-columns: 1fr;
+  justify-items: start;
+  gap: 6px;
+  min-height: 72px;
+  padding: 12px;
+  text-align: left;
+  border-color: var(--line);
+}
+
+.batch-row strong,
+.history-list strong {
+  color: var(--blue);
+  overflow-wrap: anywhere;
+}
+
+.batch-row span,
+.history-list span {
+  color: var(--muted);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.batch-row.error span {
+  color: #d93673;
+}
+
+.history-list {
+  display: grid;
+  gap: 10px;
+  min-height: 130px;
+}
+
+.history-empty {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  border: 2px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-weight: 850;
 }
 
 .ip-cards {
@@ -304,7 +486,8 @@ body {
 
 .info-grid div {
   display: grid;
-  grid-template-columns: 118px minmax(0, 1fr);
+  grid-template-columns: 118px minmax(0, 1fr) auto;
+  gap: 10px;
   align-items: center;
   min-height: 58px;
   padding: 0 16px;
@@ -324,6 +507,17 @@ body {
   font-size: 18px;
   text-align: right;
   overflow-wrap: anywhere;
+}
+
+.copy-button {
+  min-width: 52px;
+  height: 32px;
+  background: #fff8d7;
+  font-size: 13px;
+}
+
+.copy-button.copied {
+  background: #9ff0b7;
 }
 
 .risk-card {
@@ -471,7 +665,8 @@ body {
 
   .search-box,
   .ip-cards,
-  .info-grid {
+  .info-grid,
+  .utility-grid {
     grid-template-columns: 1fr;
   }
 
@@ -512,6 +707,10 @@ body {
     text-align: left;
   }
 
+  .copy-button {
+    width: max-content;
+  }
+
   .risk-card {
     margin: 0 18px 18px;
     padding: 18px;
@@ -520,5 +719,10 @@ body {
   .analysis-table {
     width: calc(100% - 36px);
     font-size: 14px;
+  }
+
+  .batch-row {
+    grid-template-columns: 1fr;
+    justify-items: start;
   }
 }
