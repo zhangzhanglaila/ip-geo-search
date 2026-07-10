@@ -71,6 +71,8 @@ By default, the web page uses a local SVG world map generated from the iPhotron 
 D:\iPhotron-LocalPhotoAlbumManager\src\maps
 ```
 
+For China results, the frontend also loads `src/ipgeosearch/static/assets/china-coordinates.json`, generated from DataV GeoAtlas administrative center points, and uses city-level coordinates before falling back to province or country-level coordinates.
+
 You can point IPGeoSearch to another compatible offline map directory:
 
 ```powershell

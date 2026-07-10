@@ -33,7 +33,9 @@ const COUNTRY_CENTROIDS = {
 const state = {
   provider: "osm",
   map: null,
-  marker: null
+  marker: null,
+  chinaCoordinates: new Map(),
+  chinaCoordinatesReady: null
 };
 
 window.addEventListener("error", (event) => {
@@ -44,6 +46,7 @@ window.addEventListener("unhandledrejection", (event) => {
   if (mapNote) mapNote.textContent = `Map error: ${event.reason?.message || event.reason}`;
 });
 
+state.chinaCoordinatesReady = loadChinaCoordinates();
 initMap();
 
 form.addEventListener("submit", async (event) => {
@@ -56,6 +59,7 @@ form.addEventListener("submit", async (event) => {
     const response = await fetch(`/lookup?ip=${encodeURIComponent(ip)}`);
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Lookup failed");
+    await state.chinaCoordinatesReady;
     render(payload);
   } catch (error) {
     renderError(error);
@@ -221,8 +225,9 @@ function normalize(payload) {
   const network = findNetwork(tableResult?.data);
   const countryCode = network.countryCode || (/^[A-Z]{2}$/.test(codeFromRegion) ? codeFromRegion : "");
   const coordinates = findCoordinates(precisionResult?.data?.record);
+  const chinaCoordinate = countryCode === "CN" ? findChinaCoordinate(city, province) : null;
   const centroid = countryCode ? COUNTRY_CENTROIDS[countryCode] : null;
-  const position = coordinates || centroid || null;
+  const position = coordinates || chinaCoordinate || centroid || null;
   const location = [country, province, city].filter(Boolean).join(" / ");
 
   return {
@@ -234,7 +239,7 @@ function normalize(payload) {
     countryName: centroid?.label || country,
     position,
     mapLabel: position
-      ? `${countryCode || "IP"} - ${coordinates ? "exact coordinates" : "country-level location"}`
+      ? `${countryCode || "IP"} - ${coordinates ? "exact coordinates" : chinaCoordinate ? "city-level location" : "country-level location"}`
       : "No coordinates"
   };
 }
@@ -277,6 +282,55 @@ function findCoordinates(value) {
     if (result) return result;
   }
   return null;
+}
+
+async function loadChinaCoordinates() {
+  try {
+    const response = await fetch("/static/assets/china-coordinates.json");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const rows = await response.json();
+    for (const row of rows) {
+      const point = { lat: Number(row.lat), lon: Number(row.lon), level: row.level || "" };
+      for (const key of chinaNameKeys(row.name)) {
+        state.chinaCoordinates.set(key, point);
+      }
+    }
+  } catch (error) {
+    console.warn("China coordinates failed to load", error);
+  }
+}
+
+function findChinaCoordinate(city, province) {
+  for (const name of [city, province]) {
+    for (const key of chinaNameKeys(name)) {
+      const point = state.chinaCoordinates.get(key);
+      if (point) return point;
+    }
+  }
+  return null;
+}
+
+function chinaNameKeys(value) {
+  const name = clean(value);
+  if (!name) return [];
+  const keys = new Set([name]);
+  const municipalities = ["北京", "天津", "上海", "重庆"];
+  for (const item of municipalities) {
+    if (name === item || name === `${item}市`) {
+      keys.add(item);
+      keys.add(`${item}市`);
+    }
+  }
+  for (const suffix of ["省", "市", "自治区", "特别行政区", "地区", "盟"]) {
+    if (name.endsWith(suffix)) {
+      keys.add(name.slice(0, -suffix.length));
+    }
+  }
+  if (!/[省市区盟]$/.test(name)) {
+    keys.add(`${name}市`);
+    keys.add(`${name}省`);
+  }
+  return [...keys].filter(Boolean);
 }
 
 function projectToWorldTile(lon, lat) {
