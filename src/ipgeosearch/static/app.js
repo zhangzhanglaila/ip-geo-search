@@ -36,6 +36,14 @@ const state = {
   marker: null
 };
 
+window.addEventListener("error", (event) => {
+  if (mapNote) mapNote.textContent = `Map error: ${event.message}`;
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  if (mapNote) mapNote.textContent = `Map error: ${event.reason?.message || event.reason}`;
+});
+
 initMap();
 
 form.addEventListener("submit", async (event) => {
@@ -75,16 +83,17 @@ async function initMap() {
 }
 
 async function initOfflineMap() {
-  await loadScript("/static/vendor/maplibre-gl/maplibre-gl.js");
-  state.map = new maplibregl.Map({
-    container: "mapCanvas",
-    style: "/offline-map/style.json",
-    center: [20, 20],
-    zoom: 1.2,
-    maxZoom: 6,
-    attributionControl: false
-  });
-  state.map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-right");
+  mapCanvas.innerHTML = `
+    <svg class="svg-world-map" viewBox="0 0 4096 4096" aria-label="Offline world map">
+      <image href="/static/assets/offline-world.svg" width="4096" height="4096"></image>
+      <g id="mapMarker" class="svg-map-marker" visibility="hidden">
+        <circle r="58" fill="#2563eb" opacity="0.18"></circle>
+        <circle r="34" fill="#2563eb" stroke="#ffffff" stroke-width="12"></circle>
+      </g>
+    </svg>
+  `;
+  state.map = mapCanvas.querySelector(".svg-world-map");
+  state.marker = mapCanvas.querySelector("#mapMarker");
   mapNote.textContent = "Offline map is active. Search an IP to locate it.";
 }
 
@@ -166,13 +175,10 @@ function updateMap(lat, lon, label) {
   if (!state.map) return;
 
   if (state.provider === "offline") {
-    const position = [lon, lat];
-    if (!state.marker) {
-      state.marker = new maplibregl.Marker({ color: "#2563eb" }).setLngLat(position).addTo(state.map);
-    } else {
-      state.marker.setLngLat(position);
-    }
-    state.map.flyTo({ center: position, zoom: 4.5, essential: true });
+    const position = projectToWorldTile(lon, lat);
+    state.marker.setAttribute("transform", `translate(${position.x.toFixed(1)} ${position.y.toFixed(1)})`);
+    state.marker.setAttribute("visibility", "visible");
+    focusSvgMap(position.x, position.y);
     return;
   }
 
@@ -269,6 +275,22 @@ function findCoordinates(value) {
     if (result) return result;
   }
   return null;
+}
+
+function projectToWorldTile(lon, lat) {
+  const boundedLat = Math.max(-85.051129, Math.min(85.051129, lat));
+  const x = ((lon + 180) / 360) * 4096;
+  const latRad = boundedLat * Math.PI / 180;
+  const mercator = Math.log(Math.tan(Math.PI / 4 + latRad / 2));
+  const y = (1 - mercator / Math.PI) / 2 * 4096;
+  return { x, y };
+}
+
+function focusSvgMap(x, y) {
+  const size = 1450;
+  const minX = Math.max(0, Math.min(4096 - size, x - size / 2));
+  const minY = Math.max(0, Math.min(4096 - size, y - size / 2));
+  state.map.setAttribute("viewBox", `${minX.toFixed(1)} ${minY.toFixed(1)} ${size} ${size}`);
 }
 
 function renderDetails(rows) {

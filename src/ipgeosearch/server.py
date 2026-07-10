@@ -8,7 +8,7 @@ import mimetypes
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from .service import IPGeoSearch
 
@@ -51,6 +51,11 @@ class LookupHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/offline-map/tiles/"):
             relative_path = parsed.path.removeprefix("/offline-map/tiles/")
             self._send_offline_tile(relative_path)
+            return
+
+        if parsed.path.startswith("/offline-map/fonts/"):
+            relative_path = parsed.path.removeprefix("/offline-map/fonts/")
+            self._send_offline_font(relative_path)
             return
 
         if parsed.path == "/health":
@@ -140,6 +145,10 @@ class LookupHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _request_origin(self) -> str:
+        host = self.headers.get("Host", f"{self.server.server_address[0]}:{self.server.server_address[1]}")
+        return f"http://{host}"
+
     def _send_offline_map_style(self) -> None:
         root = _offline_map_root()
         style_path = root / "style.json"
@@ -150,17 +159,12 @@ class LookupHandler(BaseHTTPRequestHandler):
         with style_path.open("r", encoding="utf-8") as handle:
             style = json.load(handle)
 
-        style.pop("glyphs", None)
+        origin = self._request_origin()
+        style["glyphs"] = f"{origin}/offline-map/fonts/{{fontstack}}/{{range}}.pbf"
         style["sources"]["maplibre"] = {
             "type": "vector",
-            "scheme": "tms",
-            "tiles": ["/offline-map/tiles/{z}/{x}/{y}.pbf"],
-            "minzoom": 0,
-            "maxzoom": 6,
+            "url": f"{origin}/offline-map/tiles.json",
         }
-        # Keep the offline map fully local. Text labels require glyph PBF files,
-        # which are not bundled with the iPhotron legacy tile set.
-        style["layers"] = [layer for layer in style.get("layers", []) if layer.get("type") != "symbol"]
         body = json.dumps(style, ensure_ascii=False).encode("utf-8")
         self._send_bytes(body, "application/json; charset=utf-8")
 
@@ -173,8 +177,8 @@ class LookupHandler(BaseHTTPRequestHandler):
 
         with tiles_json.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
-        payload["tiles"] = ["/offline-map/tiles/{z}/{x}/{y}.pbf"]
-        payload["scheme"] = "tms"
+        payload["tiles"] = [f"{self._request_origin()}/offline-map/tiles/{{z}}/{{x}}/{{y}}.pbf"]
+        payload["scheme"] = "xyz"
         self._send_bytes(json.dumps(payload, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
 
     def _send_offline_tile(self, relative_path: str) -> None:
@@ -185,6 +189,18 @@ class LookupHandler(BaseHTTPRequestHandler):
             return
         if not path.is_file() or path.suffix != ".pbf":
             self._send_json({"error": "tile not found"}, status=404)
+            return
+        self._send_bytes(path.read_bytes(), "application/x-protobuf")
+
+    def _send_offline_font(self, relative_path: str) -> None:
+        root = (_offline_map_root() / "font").resolve()
+        parts = [unquote(part) for part in relative_path.split("/")]
+        path = root.joinpath(*parts).resolve()
+        if not str(path).startswith(str(root)):
+            self._send_json({"error": "not found"}, status=404)
+            return
+        if not path.is_file() or path.suffix != ".pbf":
+            self._send_json({"error": "font not found"}, status=404)
             return
         self._send_bytes(path.read_bytes(), "application/x-protobuf")
 

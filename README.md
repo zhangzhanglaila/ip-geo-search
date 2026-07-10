@@ -65,13 +65,13 @@ Open the web page:
 http://127.0.0.1:8787/
 ```
 
-By default, the web page uses the local offline vector map from:
+By default, the web page uses a local SVG world map generated from the iPhotron offline PBF vector tiles. The source map data is read from:
 
 ```text
 D:\iPhotron-LocalPhotoAlbumManager\src\maps
 ```
 
-You can point IPGeoSearch to another compatible MapLibre vector tile directory:
+You can point IPGeoSearch to another compatible offline map directory:
 
 ```powershell
 $env:IPGEOSEARCH_OFFLINE_MAP_ROOT="D:\path\to\maps"
