@@ -42,8 +42,8 @@
             autocomplete="off"
             spellcheck="false"
             value="117.151.83.202"
-            aria-label="IP address"
-            placeholder="请输入 IPv4 或 IPv6"
+            aria-label="IP address or domain"
+            placeholder="请输入 IP 或域名"
           />
           <button type="submit">立即查询</button>
         </form>
@@ -59,12 +59,14 @@
             <textarea
               id="batchInput"
               spellcheck="false"
-              placeholder="每行一个 IP，例如：&#10;117.151.83.202&#10;8.8.8.8"
+              placeholder="每行一个 IP 或域名，例如：&#10;117.151.83.202&#10;github.com&#10;8.8.8.8"
             ></textarea>
             <div class="tool-actions">
               <button type="button" id="batchButton">批量定位</button>
               <button type="button" id="clearBatchButton">清空</button>
               <button type="button" id="copyBatchButton">复制结果</button>
+              <button type="button" id="exportCsvButton">导出 CSV</button>
+              <button type="button" id="exportJsonButton">导出 JSON</button>
             </div>
             <div class="batch-results" id="batchResults" aria-live="polite"></div>
           </div>

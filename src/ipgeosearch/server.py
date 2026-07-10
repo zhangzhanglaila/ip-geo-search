@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import mimetypes
 import os
+import re
+import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -15,6 +18,7 @@ from .service import IPGeoSearch
 
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
 DEFAULT_OFFLINE_MAP_ROOT = Path("D:/iPhotron-LocalPhotoAlbumManager/src/maps")
+HOSTNAME_PATTERN = re.compile(r"^(?=.{1,253}$)(?!-)[A-Za-z0-9.-]+(?<!-)$")
 
 
 def _offline_map_root() -> Path:
@@ -64,6 +68,10 @@ class LookupHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/datasets":
             self._send_json({"datasets": self.service.available_csv_datasets()})
+            return
+
+        if parsed.path == "/resolve":
+            self._send_resolve(parse_qs(parsed.query))
             return
 
         if parsed.path == "/map-config":
@@ -148,6 +156,36 @@ class LookupHandler(BaseHTTPRequestHandler):
     def _request_origin(self) -> str:
         host = self.headers.get("Host", f"{self.server.server_address[0]}:{self.server.server_address[1]}")
         return f"http://{host}"
+
+    def _send_resolve(self, query: dict[str, list[str]]) -> None:
+        host = query.get("host", [""])[0].strip().strip(".")
+        if not host:
+            self._send_json({"error": "missing host query parameter"}, status=400)
+            return
+
+        try:
+            parsed_ip = ipaddress.ip_address(host)
+            self._send_json({"host": host, "addresses": [str(parsed_ip)]})
+            return
+        except ValueError:
+            pass
+
+        if not HOSTNAME_PATTERN.match(host) or ".." in host:
+            self._send_json({"error": "invalid hostname"}, status=400)
+            return
+
+        try:
+            rows = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+            addresses = sorted({row[4][0] for row in rows}, key=lambda value: (":" in value, value))
+        except socket.gaierror as exc:
+            self._send_json({"error": f"resolve failed: {exc.strerror or exc}"}, status=400)
+            return
+
+        if not addresses:
+            self._send_json({"error": "no addresses found"}, status=404)
+            return
+
+        self._send_json({"host": host, "addresses": addresses})
 
     def _send_offline_map_style(self) -> None:
         root = _offline_map_root()

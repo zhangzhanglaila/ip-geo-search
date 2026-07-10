@@ -321,7 +321,8 @@ body {
 
 .tool-actions button,
 .copy-button,
-.history-list button {
+.history-list button,
+.batch-row button {
   border: 2px solid var(--outline);
   border-radius: 8px;
   color: var(--outline);
@@ -348,7 +349,7 @@ body {
 
 .batch-row {
   display: grid;
-  grid-template-columns: minmax(96px, 0.75fr) minmax(0, 1.45fr) auto;
+  grid-template-columns: minmax(130px, 0.8fr) minmax(0, 1.35fr) auto auto;
   gap: 10px;
   align-items: center;
   min-height: 46px;
@@ -356,6 +357,17 @@ body {
   border: 2px solid var(--line);
   border-radius: 8px;
   background: #fff;
+}
+
+.batch-row button {
+  min-height: 32px;
+  padding: 0 10px;
+  background: #fff8d7;
+}
+
+.batch-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .history-list button {
