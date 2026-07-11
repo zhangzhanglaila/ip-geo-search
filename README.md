@@ -66,25 +66,16 @@ Health check:
 http://127.0.0.1:8787/health
 ```
 
-## Example Lookup Response / 查询示例
+## Lookup Response / 查询返回
 
-```json
-{
-  "ip": "8.8.8.8",
-  "ip_version": 4,
-  "results": [
-    {
-      "source": "local",
-      "ok": true,
-      "data": {
-        "country": "United States",
-        "region": "California",
-        "network": "Google LLC"
-      }
-    }
-  ]
-}
-```
+The lookup API returns the queried IP, IP version, and a `results` array. Each item contains:
+
+- `source`: local lookup module name
+- `ok`: whether the lookup succeeded
+- `data`: matched location, network, ASN, or coordinate data
+- `error`: error message when a lookup module cannot return data
+
+查询接口会返回 IP、IP 版本和 `results` 数组。每个结果项包含查询模块、是否成功、匹配到的位置/网络/ASN/坐标数据，以及错误信息。
 
 ## Environment / 环境
 
