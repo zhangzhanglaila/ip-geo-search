@@ -28,6 +28,21 @@ body {
   background-size: 34px 34px;
 }
 
+body.theme-dark {
+  --ink: #edf4ff;
+  --muted: #b2bdd2;
+  --line: #34415a;
+  --page: #101725;
+  --panel: #1a2336;
+  --outline: #e1ebff;
+  --shadow: 8px 8px 0 rgba(0, 0, 0, 0.3);
+  background:
+    linear-gradient(90deg, rgba(77, 140, 255, 0.1) 1px, transparent 1px),
+    linear-gradient(rgba(255, 122, 182, 0.08) 1px, transparent 1px),
+    var(--page);
+  background-size: 34px 34px;
+}
+
 .nav {
   position: sticky;
   top: 0;
@@ -49,6 +64,20 @@ body {
   font-size: 14px;
   font-weight: 850;
   white-space: nowrap;
+}
+
+.theme-toggle {
+  margin-left: auto;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 3px solid var(--outline);
+  border-radius: 8px;
+  color: var(--outline);
+  background: var(--blue);
+  font: inherit;
+  font-weight: 950;
+  cursor: pointer;
+  box-shadow: 3px 3px 0 rgba(38, 50, 79, 0.16);
 }
 
 .logo-mark {
@@ -715,10 +744,92 @@ body {
   line-height: 1.5;
 }
 
+body.theme-dark .nav {
+  background: rgba(18, 24, 38, 0.94);
+}
+
+body.theme-dark .theme-toggle {
+  color: #111827;
+  background: var(--yellow);
+}
+
+body.theme-dark .hero h1 {
+  text-shadow: 4px 4px 0 rgba(0, 0, 0, 0.6), 7px 7px 0 rgba(48, 213, 200, 0.18);
+}
+
+body.theme-dark .mode-switch,
+body.theme-dark .search-box,
+body.theme-dark .tool-panel,
+body.theme-dark .ip-cards article,
+body.theme-dark .panel {
+  background: var(--panel);
+}
+
+body.theme-dark .mode-switch button,
+body.theme-dark .search-box input,
+body.theme-dark .tool-actions button,
+body.theme-dark .copy-button,
+body.theme-dark .history-list button,
+body.theme-dark .batch-row,
+body.theme-dark .info-grid div,
+body.theme-dark .api-grid article,
+body.theme-dark .map-badge {
+  color: var(--ink);
+  background: #141c2e;
+}
+
+body.theme-dark .search-box input::placeholder {
+  color: #90a0bd;
+}
+
+body.theme-dark .search-box button,
+body.theme-dark .tool-actions button:first-child,
+body.theme-dark .mode-switch button.active,
+body.theme-dark .copy-button.copied {
+  color: #111827;
+}
+
+body.theme-dark .search-box button {
+  background: var(--cyan);
+}
+
+body.theme-dark .tool-panel header,
+body.theme-dark .panel header {
+  background-color: rgba(18, 24, 38, 0.9);
+}
+
+body.theme-dark .batch-row,
+body.theme-dark .history-list button,
+body.theme-dark .info-grid div,
+body.theme-dark .api-grid article,
+body.theme-dark .map-badge {
+  border-color: var(--line);
+}
+
+body.theme-dark .history-empty {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+body.theme-dark .risk-card {
+  background: #23192f;
+}
+
+body.theme-dark .map-stage {
+  background: #121a2b;
+}
+
+body.theme-dark .api-grid code {
+  background: #101725;
+}
+
 @media (max-width: 760px) {
   .nav-inner {
     gap: 14px;
     overflow-x: auto;
+  }
+
+  .theme-toggle {
+    margin-left: 0;
   }
 
   .shell {

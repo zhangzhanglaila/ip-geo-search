@@ -2,6 +2,7 @@ const form = document.querySelector("#searchForm");
 const ipInput = document.querySelector("#ipInput");
 const singleModeButton = document.querySelector("#singleModeButton");
 const batchModeButton = document.querySelector("#batchModeButton");
+const themeToggleButton = document.querySelector("#themeToggleButton");
 const multiTools = document.querySelector("#multiTools");
 const batchInput = document.querySelector("#batchInput");
 const batchButton = document.querySelector("#batchButton");
@@ -28,6 +29,7 @@ const analysisBody = document.querySelector("#analysisBody");
 const mapNote = document.querySelector("#mapNote");
 
 const HISTORY_KEY = "ipgeosearch.history";
+const THEME_KEY = "ipgeosearch.theme";
 const MAX_HISTORY = 8;
 
 const COUNTRY_CENTROIDS = {
@@ -60,11 +62,17 @@ const state = {
 
 state.chinaCoordinatesReady = loadChinaCoordinates();
 state.mapReady = initMap();
+applyTheme(readTheme());
 renderAnalysis();
 renderHistory();
 
 singleModeButton.addEventListener("click", () => setMode("single"));
 batchModeButton.addEventListener("click", () => setMode("batch"));
+themeToggleButton.addEventListener("click", () => {
+  const nextTheme = document.body.classList.contains("theme-dark") ? "light" : "dark";
+  localStorage.setItem(THEME_KEY, nextTheme);
+  applyTheme(nextTheme);
+});
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -146,6 +154,19 @@ function setMode(mode) {
   } else {
     window.setTimeout(() => ipInput.focus(), 0);
   }
+}
+
+function readTheme() {
+  const saved = localStorage.getItem(THEME_KEY);
+  if (saved === "dark" || saved === "light") return saved;
+  return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ? "dark" : "light";
+}
+
+function applyTheme(theme) {
+  const isDark = theme === "dark";
+  document.body.classList.toggle("theme-dark", isDark);
+  themeToggleButton.textContent = isDark ? "浅色" : "深色";
+  themeToggleButton.setAttribute("aria-pressed", String(isDark));
 }
 
 async function lookupTarget(target) {
