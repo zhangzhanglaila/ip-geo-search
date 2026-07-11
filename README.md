@@ -1,103 +1,63 @@
 # IPGeoSearch / IP 地理搜索
 
-Offline IP geolocation search with multi-source lookup, ASN detection, and map-ready output.
+IPGeoSearch is a local IP and domain geolocation search tool with a playful web interface, online map display, batch lookup, history, and export support.
 
-IPGeoSearch is a local IP geolocation toolkit that combines `ip2region`, `ip-location-db`, and optional MaxMind GeoIP2 MMDB data. It is built for fast offline IP lookup, data comparison across sources, and future map visualization.
-
-IPGeoSearch 是一个离线 IP 地理搜索工具，整合 `ip2region`、`ip-location-db` 和可选的 MaxMind GeoIP2 MMDB 数据，支持快速查询 IP 归属地、ASN 信息，并为地图可视化展示预留接口。
+IPGeoSearch 是一个本地 IP 与域名地理位置查询工具，提供动漫风前端页面、在线地图定位、批量查询、查询历史和结果导出能力。
 
 ## Features / 功能
 
-- Fast offline IP lookup with `ip2region` `.xdb` files.
-- Country and ASN lookup from `ip-location-db` CSV datasets.
-- Optional MaxMind GeoIP2 `.mmdb` reader support.
-- IPv4 and IPv6 support.
-- CLI query tool.
-- Lightweight HTTP API.
-- Web page with offline map display for IP search and location markers.
-
-## Data Sources / 数据源
-
-IPGeoSearch reads existing sibling project directories by default:
-
-```text
-../ip2region
-../ip-location-db
-../GeoIP2-python
-```
-
-It does not copy large database files into this project.
-
-默认情况下，IPGeoSearch 会读取当前目录旁边已有的三个项目，不会复制大型数据库文件。
+- Single IP or domain lookup by default.
+- Switchable batch lookup mode for multiple IPs and domains.
+- Domain-to-IP resolution before geolocation lookup.
+- Online map display with single-point and multi-point markers.
+- Click a batch result to focus the map on that location.
+- Copy IP, location, ASN, ISP, and coordinates.
+- Query history with one-click re-query.
+- Export batch results to CSV or JSON.
+- Lightweight HTTP API for local integration.
 
 ## Quick Start / 快速开始
 
+Start the web service:
+
 ```powershell
 cd D:\ip\ip-geo-search
-python lookup.py 8.8.8.8
-python lookup.py 8.8.8.8 --json
-python lookup.py 2404:6800:4005:80a::200e --json
-```
-
-Query selected sources:
-
-```powershell
-python lookup.py 8.8.8.8 --source ip2region --source csv --json
-```
-
-List available `ip-location-db` CSV datasets:
-
-```powershell
-python lookup.py --list-csv
-```
-
-## HTTP API / HTTP 接口
-
-Start the API server:
-
-```powershell
 python api.py --host 127.0.0.1 --port 8787
 ```
 
-Open the web page:
+Open:
 
 ```text
 http://127.0.0.1:8787/
 ```
 
-By default, the web page uses a local SVG world map generated from the iPhotron offline PBF vector tiles. The source map data is read from:
-
-```text
-D:\iPhotron-LocalPhotoAlbumManager\src\maps
-```
-
-For China results, the frontend also loads `src/ipgeosearch/static/assets/china-coordinates.json`, generated from DataV GeoAtlas administrative center points, and uses city-level coordinates before falling back to province or country-level coordinates.
-
-You can point IPGeoSearch to another compatible offline map directory:
+CLI lookup:
 
 ```powershell
-$env:IPGEOSEARCH_OFFLINE_MAP_ROOT="D:\path\to\maps"
-python api.py --host 127.0.0.1 --port 8787
+python lookup.py 8.8.8.8
+python lookup.py 8.8.8.8 --json
 ```
 
-If the offline map directory is unavailable, the web page falls back to OpenStreetMap. To use Amap instead, set an Amap Web JS API key before starting the server:
+## Web Usage / 页面用法
 
-```powershell
-$env:MAP_PROVIDER="amap"
-$env:AMAP_WEB_KEY="your-amap-web-js-api-key"
-python api.py --host 127.0.0.1 --port 8787
-```
+1. Open the page and use the default **单个查询** mode.
+2. Enter an IP or domain, such as `8.8.8.8` or `github.com`.
+3. Click **立即查询** to view location, ASN, ISP, risk score, and map marker.
+4. Click **多个查询** to batch query multiple IPs or domains.
+5. Use **导出 CSV** or **导出 JSON** to save batch results.
 
-Lookup:
+## HTTP API / HTTP 接口
+
+Lookup an IP:
 
 ```text
 http://127.0.0.1:8787/lookup?ip=8.8.8.8
 ```
 
-List datasets:
+Resolve a domain:
 
 ```text
-http://127.0.0.1:8787/datasets
+http://127.0.0.1:8787/resolve?host=github.com
 ```
 
 Health check:
@@ -106,7 +66,7 @@ Health check:
 http://127.0.0.1:8787/health
 ```
 
-## Example Output / 示例输出
+## Example Lookup Response / 查询示例
 
 ```json
 {
@@ -114,61 +74,36 @@ http://127.0.0.1:8787/health
   "ip_version": 4,
   "results": [
     {
-      "source": "ip2region",
+      "source": "local",
       "ok": true,
       "data": {
-        "region": "United States|California|0|Google LLC|US",
-        "ip_version": 4
-      }
-    },
-    {
-      "source": "ip-location-db",
-      "ok": true,
-      "data": {
-        "user-country": {
-          "country_code": "US"
-        },
-        "origin-asn": {
-          "autonomous_system_number": "15169",
-          "autonomous_system_organization": "Google LLC"
-        }
+        "country": "United States",
+        "region": "California",
+        "network": "Google LLC"
       }
     }
   ]
 }
 ```
 
-## Optional GeoIP2 MMDB / 可选 GeoIP2 数据库
+## Environment / 环境
 
-`GeoIP2-python` is a reader library. It does not include MaxMind database files.
-
-To enable GeoIP2 lookup, set `GEOIP2_MMDB`:
+The project runs as a local Python service and serves the frontend from `src/ipgeosearch/static`.
 
 ```powershell
-$env:GEOIP2_MMDB="D:\data\GeoLite2-City.mmdb"
-python lookup.py 8.8.8.8 --source geoip2 --json
-```
-
-## Environment Variables / 环境变量
-
-```powershell
-$env:IP2REGION_ROOT="D:\ip\ip2region"
-$env:IP_LOCATION_DB_ROOT="D:\ip\ip-location-db"
-$env:GEOIP2_PYTHON_ROOT="D:\ip\GeoIP2-python"
-$env:GEOIP2_MMDB="D:\data\GeoLite2-City.mmdb"
-$env:IPGEOSEARCH_OFFLINE_MAP_ROOT="D:\iPhotron-LocalPhotoAlbumManager\src\maps"
+python api.py --host 127.0.0.1 --port 8787
 ```
 
 ## Roadmap / 规划
 
-- More precise map markers when city-level latitude and longitude are available.
-- Batch IP lookup.
-- Export results to CSV and JSON.
-- More source comparison views.
+- Better IP type detection.
+- More detailed risk labels.
+- Dark anime theme.
+- API documentation page.
 - Docker packaging.
 
 ## License / 许可证
 
-This integration project is not yet licensed. Please check the licenses of the upstream data sources before using their datasets.
+This project has not added a license yet.
 
-本项目目前尚未添加许可证。使用上游数据时，请分别确认 `ip2region`、`ip-location-db`、GeoIP2/GeoLite2 等数据源的许可证要求。
+本项目目前尚未添加许可证。
