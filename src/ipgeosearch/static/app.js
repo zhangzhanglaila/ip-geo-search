@@ -524,7 +524,10 @@ function scrollMapIntoView() {
 }
 
 function scrollResultIntoView() {
-  document.querySelector("#resultPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const panel = document.querySelector("#resultPanel");
+  if (!panel) return;
+  const top = panel.getBoundingClientRect().top + window.scrollY - 76;
+  window.scrollTo({ top: Math.max(0, top), behavior: "auto" });
 }
 
 function updateLineToggle() {
