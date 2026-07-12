@@ -72,6 +72,7 @@ const state = {
   chinaCoordinatesReady: null,
   mapReady: null,
   connectBatchPoints: false,
+  autoQuery: false,
   lastBatchRows: [],
   lastDns: null
 };
@@ -96,6 +97,7 @@ form.addEventListener("submit", async (event) => {
   if (!ip) return;
 
   const requestMode = state.mode;
+  const shouldScrollResult = !state.autoQuery;
   form.querySelector("button").disabled = true;
   mapNote.textContent = "正在查询 IP 信息...";
   try {
@@ -104,9 +106,11 @@ form.addEventListener("submit", async (event) => {
     if (requestMode !== state.mode) return;
     render(payload, data);
     addHistory(data);
+    if (shouldScrollResult) scrollResultIntoView();
   } catch (error) {
     if (requestMode !== state.mode) return;
     renderError(error);
+    if (shouldScrollResult) scrollResultIntoView();
   } finally {
     form.querySelector("button").disabled = false;
   }
@@ -189,7 +193,9 @@ batchResults.addEventListener("click", (event) => {
 
 window.addEventListener("load", () => {
   setMode("single");
+  state.autoQuery = true;
   form.requestSubmit();
+  state.autoQuery = false;
 });
 
 function setMode(mode) {
@@ -468,6 +474,7 @@ function updateMapMany(rows) {
     state.map.setView(bounds[0], 8, { animate: false });
   } else {
     state.map.fitBounds(bounds, { padding: [70, 70], maxZoom: 8, animate: false });
+    state.map.panTo(bounds[0], { animate: false });
   }
 }
 
@@ -514,6 +521,10 @@ function focusBatchRow(row) {
 
 function scrollMapIntoView() {
   document.querySelector(".map-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function scrollResultIntoView() {
+  document.querySelector("#resultPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function updateLineToggle() {
