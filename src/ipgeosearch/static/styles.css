@@ -383,6 +383,11 @@ body.theme-dark {
   background: var(--yellow);
 }
 
+.tool-actions button.active {
+  color: #fff;
+  background: var(--pink);
+}
+
 .batch-results {
   display: grid;
   gap: 10px;
@@ -903,6 +908,7 @@ body.theme-dark .search-box input::placeholder {
 
 body.theme-dark .search-box button,
 body.theme-dark .tool-actions button:first-child,
+body.theme-dark .tool-actions button.active,
 body.theme-dark .copy-button.copied {
   color: #111827;
 }

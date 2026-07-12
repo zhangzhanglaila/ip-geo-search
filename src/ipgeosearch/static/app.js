@@ -6,6 +6,7 @@ const themeToggleButton = document.querySelector("#themeToggleButton");
 const multiTools = document.querySelector("#multiTools");
 const batchInput = document.querySelector("#batchInput");
 const batchButton = document.querySelector("#batchButton");
+const lineToggleButton = document.querySelector("#lineToggleButton");
 const clearBatchButton = document.querySelector("#clearBatchButton");
 const copyBatchButton = document.querySelector("#copyBatchButton");
 const exportCsvButton = document.querySelector("#exportCsvButton");
@@ -60,6 +61,7 @@ const state = {
   chinaCoordinates: new Map(),
   chinaCoordinatesReady: null,
   mapReady: null,
+  connectBatchPoints: false,
   lastBatchRows: [],
   lastDns: null
 };
@@ -102,9 +104,20 @@ form.addEventListener("submit", async (event) => {
 
 batchButton.addEventListener("click", runBatchLookup);
 
+lineToggleButton.addEventListener("click", () => {
+  state.connectBatchPoints = !state.connectBatchPoints;
+  updateLineToggle();
+  const locatedRows = state.lastBatchRows.filter((row) => row.position);
+  if (locatedRows.length) updateMapMany(locatedRows);
+  if (state.connectBatchPoints && locatedRows.length < 2) {
+    mapNote.textContent = "至少需要两个已定位结果才能连线。";
+  }
+});
+
 clearBatchButton.addEventListener("click", () => {
   batchInput.value = "";
   state.lastBatchRows = [];
+  state.markerLayer?.clearLayers();
   renderBatchResults([]);
 });
 
@@ -424,12 +437,22 @@ function updateMapMany(rows) {
   if (!state.map || !window.L || !rows.length) return;
   state.markerLayer?.clearLayers();
   const bounds = [];
+  const routePoints = [];
   for (const row of rows) {
     const position = [row.position.lat, row.position.lon];
     bounds.push(position);
+    routePoints.push(position);
     L.marker(position)
       .addTo(state.markerLayer || state.map)
       .bindPopup(mapPopupHtml(row));
+  }
+  if (state.connectBatchPoints && routePoints.length > 1) {
+    L.polyline(routePoints, {
+      color: "#ff4f9a",
+      weight: 4,
+      opacity: 0.88,
+      dashArray: "10 8"
+    }).addTo(state.markerLayer || state.map);
   }
   if (bounds.length === 1) {
     state.map.setView(bounds[0], 8);
@@ -454,6 +477,12 @@ function focusBatchRow(row) {
 
 function scrollMapIntoView() {
   document.querySelector(".map-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function updateLineToggle() {
+  lineToggleButton.classList.toggle("active", state.connectBatchPoints);
+  lineToggleButton.textContent = state.connectBatchPoints ? "隐藏连线" : "连线显示";
+  lineToggleButton.setAttribute("aria-pressed", String(state.connectBatchPoints));
 }
 
 function normalize(payload) {
