@@ -31,7 +31,6 @@ const basicAsn = document.querySelector("#basicAsn");
 const basicIsp = document.querySelector("#basicIsp");
 const basicIpType = document.querySelector("#basicIpType");
 const basicCoords = document.querySelector("#basicCoords");
-const basicBroadcast = document.querySelector("#basicBroadcast");
 const riskScore = document.querySelector("#riskScore");
 const riskNeedle = document.querySelector("#riskNeedle");
 const riskSummary = document.querySelector("#riskSummary");
@@ -413,7 +412,6 @@ function render(payload, data) {
   basicIsp.textContent = data.isp || data.networkName || "-";
   basicIpType.textContent = data.ipType || "-";
   basicCoords.textContent = data.position ? `${data.position.lon.toFixed(6)}, ${data.position.lat.toFixed(6)}` : "-";
-  basicBroadcast.textContent = "N/A";
   renderRisk(data);
   renderAnalysis(data);
   renderDns(data.dns);

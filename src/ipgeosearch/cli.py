@@ -10,7 +10,7 @@ from .service import DEFAULT_CSV_DATASETS, IPGeoSearch
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="IPGeoSearch offline IP geolocation lookup")
+    parser = argparse.ArgumentParser(description="IPGeoSearch local IP geolocation lookup")
     parser.add_argument("ip", nargs="?", help="IP address to query")
     parser.add_argument(
         "--source",
