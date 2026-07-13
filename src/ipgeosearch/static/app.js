@@ -6,16 +6,21 @@ const themeToggleButton = document.querySelector("#themeToggleButton");
 const multiTools = document.querySelector("#multiTools");
 const batchInput = document.querySelector("#batchInput");
 const batchButton = document.querySelector("#batchButton");
+const batchFileInput = document.querySelector("#batchFileInput");
+const retryFailedButton = document.querySelector("#retryFailedButton");
 const lineToggleButton = document.querySelector("#lineToggleButton");
 const clearBatchButton = document.querySelector("#clearBatchButton");
 const copyBatchButton = document.querySelector("#copyBatchButton");
 const exportCsvButton = document.querySelector("#exportCsvButton");
 const exportJsonButton = document.querySelector("#exportJsonButton");
 const batchResults = document.querySelector("#batchResults");
+const batchStats = document.querySelector("#batchStats");
 const historyList = document.querySelector("#historyList");
 const clearHistoryButton = document.querySelector("#clearHistoryButton");
 const copyDnsButton = document.querySelector("#copyDnsButton");
 const dnsResults = document.querySelector("#dnsResults");
+const copyIntelButton = document.querySelector("#copyIntelButton");
+const intelResults = document.querySelector("#intelResults");
 const ipv4Label = document.querySelector("#ipv4Label");
 const ipv6Label = document.querySelector("#ipv6Label");
 const ipv4Value = document.querySelector("#ipv4Value");
@@ -74,7 +79,8 @@ const state = {
   connectBatchPoints: false,
   autoQuery: false,
   lastBatchRows: [],
-  lastDns: null
+  lastDns: null,
+  lastIntelText: ""
 };
 
 state.chinaCoordinatesReady = loadChinaCoordinates();
@@ -118,6 +124,24 @@ form.addEventListener("submit", async (event) => {
 
 batchButton.addEventListener("click", runBatchLookup);
 
+batchFileInput.addEventListener("change", async () => {
+  const file = batchFileInput.files?.[0];
+  if (!file) return;
+  const text = await file.text();
+  addTargetsToBatchInput(parseTargets(text));
+  batchFileInput.value = "";
+});
+
+retryFailedButton.addEventListener("click", () => {
+  const failedTargets = uniqueItems(state.lastBatchRows.filter((row) => row.error).map((row) => row.input).filter(Boolean));
+  if (!failedTargets.length) {
+    mapNote.textContent = "当前没有失败结果需要重试。";
+    return;
+  }
+  batchInput.value = failedTargets.join("\n");
+  runBatchLookup();
+});
+
 lineToggleButton.addEventListener("click", () => {
   state.connectBatchPoints = !state.connectBatchPoints;
   updateLineToggle();
@@ -132,6 +156,7 @@ clearBatchButton.addEventListener("click", () => {
   batchInput.value = "";
   state.lastBatchRows = [];
   state.markerLayer?.clearLayers();
+  renderBatchStats([]);
   renderBatchResults([]);
 });
 
@@ -183,6 +208,10 @@ copyDnsButton.addEventListener("click", async () => {
   await copyText(formatDnsText(state.lastDns), copyDnsButton);
 });
 
+copyIntelButton.addEventListener("click", async () => {
+  await copyText(state.lastIntelText, copyIntelButton);
+});
+
 batchResults.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-row-index]");
   if (!button) return;
@@ -229,10 +258,18 @@ function applyTheme(theme) {
 
 async function lookupTarget(target) {
   const resolved = await resolveTarget(target);
-  const lookupPromise = lookupIp(resolved.ip, resolved);
-  const dnsPromise = resolved.resolved ? lookupDns(resolved.input).catch((error) => ({ error: error.message })) : Promise.resolve(null);
-  const result = await lookupPromise;
-  result.data.dns = await dnsPromise;
+  const result = await lookupIp(resolved.ip, resolved);
+  const [dns, intel, rdap, probe] = await Promise.all([
+    resolved.resolved ? lookupDns(resolved.input).catch((error) => ({ error: error.message })) : Promise.resolve(null),
+    lookupIntel(resolved.ip).catch((error) => ({ error: error.message })),
+    lookupRdap(resolved.ip).catch((error) => ({ error: error.message })),
+    lookupProbe(resolved.input).catch((error) => ({ error: error.message }))
+  ]);
+  result.data.dns = dns;
+  result.data.intel = intel;
+  result.data.rdap = rdap;
+  result.data.probe = probe;
+  applyIntelRisk(result.data);
   return result;
 }
 
@@ -269,9 +306,32 @@ async function lookupDns(host) {
   return payload;
 }
 
+async function lookupIntel(ip) {
+  const response = await fetch(`/intel?ip=${encodeURIComponent(ip)}`);
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || "网络情报查询失败");
+  return payload;
+}
+
+async function lookupRdap(ip) {
+  const response = await fetch(`/rdap?ip=${encodeURIComponent(ip)}`);
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || "RDAP 查询失败");
+  return payload;
+}
+
+async function lookupProbe(target) {
+  const response = await fetch(`/probe?target=${encodeURIComponent(target)}`);
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || "连通性检测失败");
+  return payload;
+}
+
 async function runBatchLookup() {
-  const targets = uniqueItems(batchInput.value.split(/[\s,，;；]+/).map((item) => item.trim()).filter(Boolean)).slice(0, 30);
+  const parsedTargets = parseTargets(batchInput.value);
+  const targets = parsedTargets.unique.slice(0, 50);
   if (!targets.length) {
+    renderBatchStats([]);
     renderBatchResults([]);
     mapNote.textContent = "请输入要批量查询的 IP。";
     return;
@@ -279,6 +339,7 @@ async function runBatchLookup() {
 
   batchButton.disabled = true;
   mapNote.textContent = `正在批量查询 ${targets.length} 个目标...`;
+  renderBatchStats([], parsedTargets);
   renderBatchResults(targets.map((target) => ({ input: target, loading: true })));
   try {
     await Promise.all([state.chinaCoordinatesReady, state.mapReady]);
@@ -291,6 +352,7 @@ async function runBatchLookup() {
     }));
     const rows = groups.flat();
     state.lastBatchRows = rows;
+    renderBatchStats(rows, parsedTargets);
     renderBatchResults(rows);
     updateMapMany(rows.filter((row) => row.position));
     rows.filter((row) => !row.error).forEach(addHistory);
@@ -355,6 +417,7 @@ function render(payload, data) {
   renderRisk(data);
   renderAnalysis(data);
   renderDns(data.dns);
+  renderIntel(data);
 
   if (data.position) {
     updateMap(data.position.lat, data.position.lon, mapPopupHtml(data), mapMarkerLabel(data));
@@ -372,6 +435,7 @@ function renderError(error) {
   basicIpType.textContent = "-";
   basicCoords.textContent = "-";
   renderDns(null);
+  renderIntel(null);
   mapNote.textContent = error.message;
 }
 
@@ -396,6 +460,54 @@ function renderBatchResults(rows) {
       </div>
     `;
   }).join("");
+}
+
+function renderBatchStats(rows, parsed = null) {
+  if (!batchStats) return;
+  if (!rows.length && !parsed) {
+    batchStats.innerHTML = "";
+    return;
+  }
+  const totalInput = parsed?.rawCount ?? rows.length;
+  const uniqueCount = parsed?.unique?.length ?? uniqueItems(rows.map((row) => row.input)).length;
+  const deduped = Math.max(0, totalInput - uniqueCount);
+  const located = rows.filter((row) => row.position).length;
+  const failed = rows.filter((row) => row.error).length;
+  const topLocations = topValues(rows.map((row) => row.location).filter((value) => value && value !== "-")).slice(0, 4);
+  batchStats.innerHTML = `
+    <span>输入 ${totalInput}</span>
+    <span>去重后 ${uniqueCount}</span>
+    <span>已定位 ${located}</span>
+    <span>失败 ${failed}</span>
+    ${deduped ? `<span>已去重 ${deduped}</span>` : ""}
+    ${topLocations.length ? `<strong>位置摘要：${topLocations.map((item) => `${escapeHtml(item.value)} ${item.count}`).join(" / ")}</strong>` : ""}
+  `;
+}
+
+function parseTargets(text) {
+  const raw = text
+    .split(/[\s,，;；]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return { rawCount: raw.length, unique: uniqueItems(raw) };
+}
+
+function addTargetsToBatchInput(targets) {
+  const rows = uniqueItems([
+    ...parseTargets(batchInput.value).unique,
+    ...targets
+  ]);
+  batchInput.value = rows.join("\n");
+  renderBatchStats([], { rawCount: rows.length, unique: rows });
+  mapNote.textContent = `已加入 ${targets.length} 个目标，点击“批量定位”开始查询。`;
+}
+
+function topValues(values) {
+  const counts = new Map();
+  for (const value of values) counts.set(value, (counts.get(value) || 0) + 1);
+  return [...counts.entries()]
+    .map(([value, count]) => ({ value, count }))
+    .sort((left, right) => right.count - left.count || left.value.localeCompare(right.value));
 }
 
 function renderHistory() {
@@ -447,6 +559,86 @@ function renderDns(payload) {
   dnsResults.innerHTML = rows;
 }
 
+function renderIntel(data) {
+  if (!data) {
+    state.lastIntelText = "";
+    intelResults.innerHTML = `<div class="intel-empty">查询后显示 RDAP、反向 DNS、DNSBL、代理/VPN/机房判断和端口连通性。</div>`;
+    return;
+  }
+
+  const intel = data.intel || {};
+  const rdap = data.rdap || {};
+  const probe = data.probe || {};
+  const privacy = intel.privacy || {};
+  const flags = privacy.flags || {};
+  const rdapInfo = rdap.rdap || {};
+  const reverseDns = intel.reverseDns || {};
+  const dnsbl = intel.dnsbl || {};
+  const probeRows = Array.isArray(probe.results) ? probe.results : [];
+  const dnsblMatches = Array.isArray(dnsbl.matches) ? dnsbl.matches : [];
+  const rdapEntities = Array.isArray(rdapInfo.entities) ? rdapInfo.entities : [];
+
+  const cards = [
+    intelCard("代理/VPN/机房", [
+      ["综合判断", privacy.summary || "-"],
+      ["风险分", Number.isFinite(privacy.score) ? `${privacy.score}分` : "-"],
+      ["标签", (privacy.tags || []).join("、") || "-"],
+      ["代理/VPN/Tor", flags.proxy ? "疑似" : "未命中"],
+      ["云服务/机房", flags.hosting ? "疑似" : "未命中"],
+      ["CDN", flags.cdn ? "疑似" : "未命中"]
+    ]),
+    intelCard("反向 DNS", [
+      ["主机名", reverseDns.hostname || reverseDns.error || "-"],
+      ["别名", (reverseDns.aliases || []).join("、") || "-"]
+    ]),
+    intelCard("DNSBL 黑名单", [
+      ["检测状态", dnsbl.checked ? "已检测" : dnsbl.reason || "未检测"],
+      ["命中数量", String(dnsblMatches.length)],
+      ["命中来源", dnsblMatches.map((item) => item.zone).join("、") || "-"]
+    ]),
+    intelCard("RDAP / WHOIS", [
+      ["机构", rdapInfo.name || rdapInfo.handle || rdap.error || rdap.reason || "-"],
+      ["国家", rdapInfo.country || "-"],
+      ["地址段", [rdapInfo.startAddress, rdapInfo.endAddress].filter(Boolean).join(" - ") || "-"],
+      ["联系人", rdapEntities.map((item) => item.name || item.email).filter(Boolean).join("、") || "-"]
+    ]),
+    intelCard("连通性检测", probeRows.length
+      ? probeRows.map((row) => [`端口 ${row.port}`, row.open ? `开放 / ${row.latencyMs}ms` : `关闭或超时 / ${row.latencyMs}ms`])
+      : [["状态", probe.error || "-"]])
+  ];
+
+  intelResults.innerHTML = cards.join("");
+  state.lastIntelText = formatIntelText(data);
+}
+
+function intelCard(title, rows) {
+  return `
+    <article class="intel-card">
+      <strong>${escapeHtml(title)}</strong>
+      ${rows.map(([label, value]) => `
+        <div>
+          <span>${escapeHtml(label)}</span>
+          <b>${escapeHtml(value || "-")}</b>
+        </div>
+      `).join("")}
+    </article>
+  `;
+}
+
+function applyIntelRisk(data) {
+  const privacy = data.intel?.privacy;
+  if (!privacy) return;
+  if (Number.isFinite(privacy.score)) {
+    data.riskScore = Math.max(Number(data.riskScore) || 0, privacy.score);
+  }
+  data.riskTags = uniqueItems([...(data.riskTags || []), ...(privacy.tags || [])]);
+  data.proxyLike = Boolean(data.proxyLike || privacy.flags?.proxy);
+  data.isServerLike = Boolean(data.isServerLike || privacy.flags?.hosting || privacy.flags?.cdn);
+  data.abuseLike = Boolean(data.abuseLike || privacy.flags?.dnsblListed);
+  if (privacy.flags?.hosting) data.ipType = "云服务 / 机房 IP";
+  if (privacy.flags?.cdn) data.ipType = "CDN / 边缘网络";
+}
+
 function updateMap(lat, lon, popupHtml, label) {
   if (!state.map || !window.L) return;
   state.markerLayer?.clearLayers();
@@ -461,11 +653,16 @@ function updateMapMany(rows) {
   state.markerLayer?.clearLayers();
   const bounds = [];
   const routePoints = [];
+  const groups = groupRowsByPosition(rows);
+  for (const group of groups) {
+    const first = group.rows[0];
+    const position = [first.position.lat, first.position.lon];
+    bounds.push(position);
+    addMapMarkerCopies(first.position.lat, first.position.lon, mapGroupPopupHtml(group.rows), mapGroupMarkerLabel(group.rows));
+  }
   for (const row of rows) {
     const position = [row.position.lat, row.position.lon];
-    bounds.push(position);
     routePoints.push(position);
-    addMapMarkerCopies(row.position.lat, row.position.lon, mapPopupHtml(row), mapMarkerLabel(row));
   }
   if (state.connectBatchPoints && routePoints.length > 1) {
     addRouteLineCopies(routePoints);
@@ -476,6 +673,17 @@ function updateMapMany(rows) {
     state.map.fitBounds(bounds, { padding: [70, 70], maxZoom: 8, animate: false });
     state.map.panTo(bounds[0], { animate: false });
   }
+}
+
+function groupRowsByPosition(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    if (!row.position) continue;
+    const key = `${row.position.lat.toFixed(5)},${row.position.lon.toFixed(5)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  return [...groups.values()].map((groupRows) => ({ rows: groupRows }));
 }
 
 function addMapMarkerCopies(lat, lon, popupHtml, label) {
@@ -538,11 +746,7 @@ function updateLineToggle() {
 
 function addTargetToBatchInput(target) {
   if (!target) return;
-  const rows = uniqueItems([
-    ...batchInput.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean),
-    target
-  ]);
-  batchInput.value = rows.join("\n");
+  addTargetsToBatchInput([target]);
   batchInput.focus();
   mapNote.textContent = `${target} 已加入批量输入框，点击“批量定位”开始查询。`;
 }
@@ -628,8 +832,31 @@ function mapPopupHtml(row) {
   `;
 }
 
+function mapGroupPopupHtml(rows) {
+  if (rows.length === 1) return mapPopupHtml(rows[0]);
+  const first = rows[0];
+  const location = first.locationDetail || first.location || first.countryName || "-";
+  const coords = first.coords || (first.position ? `${first.position.lon.toFixed(6)}, ${first.position.lat.toFixed(6)}` : "-");
+  const items = rows.slice(0, 12).map((row) => `<li>${escapeHtml(row.inputLabel || row.ip || row.input || "-")}</li>`).join("");
+  const more = rows.length > 12 ? `<li>还有 ${rows.length - 12} 个结果...</li>` : "";
+  return `
+    <div class="map-popup map-popup-group">
+      <strong>${rows.length} 个结果位于此处</strong>
+      <span>位置：${escapeHtml(location)}</span>
+      <span>坐标：${escapeHtml(coords)}</span>
+      <ul>${items}${more}</ul>
+    </div>
+  `;
+}
+
 function mapMarkerLabel(row) {
   return row.inputLabel || (row.resolvedFromDomain ? `${row.input} -> ${row.resolvedIp}` : row.ip) || "IP 位置";
+}
+
+function mapGroupMarkerLabel(rows) {
+  if (rows.length === 1) return mapMarkerLabel(rows[0]);
+  const first = rows[0];
+  return `${rows.length} 个结果：${first.location || first.inputLabel || first.ip}`;
 }
 
 function renderRisk(data = {}) {
@@ -764,14 +991,28 @@ function exportBatch(format) {
       ip: row.ip,
       location: row.location || "",
       coordinates: row.coords || "",
+      ipType: row.ipType || "",
+      riskScore: row.riskScore ?? "",
+      asn: row.asn || "",
+      isp: row.isp || "",
       error: row.error || ""
     }));
     downloadFile(`ipgeosearch-${timestamp}.json`, JSON.stringify(payload, null, 2), "application/json;charset=utf-8");
     return;
   }
 
-  const header = ["input", "ip", "location", "coordinates", "error"];
-  const body = rows.map((row) => [row.input, row.ip, row.location || "", row.coords || "", row.error || ""]);
+  const header = ["input", "ip", "location", "coordinates", "ip_type", "risk_score", "asn", "isp", "error"];
+  const body = rows.map((row) => [
+    row.input,
+    row.ip,
+    row.location || "",
+    row.coords || "",
+    row.ipType || "",
+    row.riskScore ?? "",
+    row.asn || "",
+    row.isp || "",
+    row.error || ""
+  ]);
   const csv = [header, ...body].map((items) => items.map(csvCell).join(",")).join("\n");
   downloadFile(`ipgeosearch-${timestamp}.csv`, `\uFEFF${csv}`, "text/csv;charset=utf-8");
 }
@@ -819,6 +1060,27 @@ function formatDnsText(payload) {
     lines.push(`${type}: ${values}`);
   }
   return lines.join("\n");
+}
+
+function formatIntelText(data) {
+  if (!data) return "";
+  const intel = data.intel || {};
+  const privacy = intel.privacy || {};
+  const rdap = data.rdap?.rdap || {};
+  const reverseDns = intel.reverseDns || {};
+  const dnsbl = intel.dnsbl || {};
+  const probeRows = data.probe?.results || [];
+  return [
+    `target: ${data.input || data.ip || "-"}`,
+    `ip: ${data.resolvedIp || data.ip || "-"}`,
+    `risk: ${privacy.summary || "-"} ${Number.isFinite(privacy.score) ? `${privacy.score}分` : ""}`.trim(),
+    `tags: ${(privacy.tags || []).join(", ") || "-"}`,
+    `reverse_dns: ${reverseDns.hostname || "-"}`,
+    `dnsbl: ${(dnsbl.matches || []).map((item) => item.zone).join(", ") || "no match"}`,
+    `rdap: ${rdap.name || rdap.handle || "-"}`,
+    `rdap_range: ${[rdap.startAddress, rdap.endAddress].filter(Boolean).join(" - ") || "-"}`,
+    `probe: ${probeRows.map((row) => `${row.port}:${row.open ? "open" : "closed"}:${row.latencyMs}ms`).join(", ") || "-"}`
+  ].join("\n");
 }
 
 async function copyText(text, button) {

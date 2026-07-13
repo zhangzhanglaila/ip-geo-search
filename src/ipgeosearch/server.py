@@ -11,6 +11,9 @@ import random
 import re
 import socket
 import struct
+import time
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
@@ -30,6 +33,13 @@ DNS_RECORD_TYPES = {
 }
 DNS_TYPE_NAMES = {value: key for key, value in DNS_RECORD_TYPES.items()}
 DNS_TIMEOUT_SECONDS = 3.0
+RDAP_TIMEOUT_SECONDS = 6.0
+PROBE_TIMEOUT_SECONDS = 3.0
+DNSBL_ZONES = (
+    "zen.spamhaus.org",
+    "bl.spamcop.net",
+    "dnsbl.sorbs.net",
+)
 
 
 def _offline_map_root() -> Path:
@@ -186,6 +196,185 @@ def _resolve_dns_records(host: str) -> dict[str, object]:
     }
 
 
+def _parse_ip(value: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+    return ipaddress.ip_address(value.strip())
+
+
+def _fetch_json(url: str, timeout: float = RDAP_TIMEOUT_SECONDS) -> dict[str, object]:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "ip-geo-search/1.0",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8", errors="replace"))
+
+
+def _vcard_value(entity: dict[str, object], field_name: str) -> str:
+    vcard = entity.get("vcardArray")
+    if not isinstance(vcard, list) or len(vcard) < 2 or not isinstance(vcard[1], list):
+        return ""
+    for item in vcard[1]:
+        if isinstance(item, list) and len(item) >= 4 and item[0] == field_name:
+            return str(item[3])
+    return ""
+
+
+def _summarize_rdap(payload: dict[str, object]) -> dict[str, object]:
+    events: dict[str, str] = {}
+    for event in payload.get("events", []):
+        if not isinstance(event, dict):
+            continue
+        action = str(event.get("eventAction", "")).strip()
+        date = str(event.get("eventDate", "")).strip()
+        if action and date:
+            events[action] = date
+
+    entities: list[dict[str, object]] = []
+    for entity in payload.get("entities", []):
+        if not isinstance(entity, dict):
+            continue
+        name = _vcard_value(entity, "fn")
+        email = _vcard_value(entity, "email")
+        roles = entity.get("roles") if isinstance(entity.get("roles"), list) else []
+        if name or email or roles:
+            entities.append({"name": name, "email": email, "roles": roles})
+        if len(entities) >= 6:
+            break
+
+    return {
+        "handle": payload.get("handle", ""),
+        "name": payload.get("name", ""),
+        "type": payload.get("type", ""),
+        "country": payload.get("country", ""),
+        "startAddress": payload.get("startAddress", ""),
+        "endAddress": payload.get("endAddress", ""),
+        "events": events,
+        "entities": entities,
+        "rawStatus": payload.get("status", []),
+    }
+
+
+def _reverse_dns(ip: str) -> dict[str, object]:
+    try:
+        hostname, aliases, addresses = socket.gethostbyaddr(ip)
+        return {
+            "ip": ip,
+            "hostname": hostname,
+            "aliases": aliases,
+            "addresses": addresses,
+        }
+    except (socket.herror, socket.gaierror, TimeoutError) as exc:
+        return {"ip": ip, "hostname": "", "aliases": [], "addresses": [], "error": str(exc)}
+
+
+def _dnsbl_lookup(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> dict[str, object]:
+    if ip.version != 4:
+        return {"checked": False, "reason": "DNSBL only supports IPv4 in this app", "matches": [], "errors": {}}
+    if not ip.is_global:
+        return {"checked": False, "reason": "non-global address", "matches": [], "errors": {}}
+
+    dns_server = os.getenv("DNS_SERVER", "223.5.5.5")
+    reversed_ip = ".".join(reversed(str(ip).split(".")))
+    matches: list[dict[str, object]] = []
+    errors: dict[str, str] = {}
+    for zone in DNSBL_ZONES:
+        query = f"{reversed_ip}.{zone}"
+        try:
+            records = _query_dns_server(query, DNS_RECORD_TYPES["A"], dns_server)
+            if records:
+                matches.append({"zone": zone, "records": records})
+        except Exception as exc:
+            errors[zone] = str(exc)
+    return {"checked": True, "server": dns_server, "matches": matches, "errors": errors}
+
+
+def _network_text(lookup_payload: dict[str, object]) -> str:
+    parts: list[str] = []
+    for result in lookup_payload.get("results", []):
+        if not isinstance(result, dict):
+            continue
+        parts.append(json.dumps(result.get("data", {}), ensure_ascii=False))
+    return " ".join(parts).lower()
+
+
+def _privacy_intel(
+    ip: ipaddress.IPv4Address | ipaddress.IPv6Address,
+    lookup_payload: dict[str, object],
+    reverse_payload: dict[str, object],
+    dnsbl_payload: dict[str, object],
+) -> dict[str, object]:
+    text = " ".join([_network_text(lookup_payload), str(reverse_payload.get("hostname", ""))]).lower()
+    flags = {
+        "private": ip.is_private,
+        "loopback": ip.is_loopback,
+        "reserved": ip.is_reserved,
+        "multicast": ip.is_multicast,
+        "global": ip.is_global,
+        "hosting": bool(re.search(r"cloud|hosting|host|server|data\s*center|datacenter|colo|aws|amazon|google|azure|microsoft|oracle|digitalocean|linode|ovh|aliyun|alibaba|tencent|huawei", text)),
+        "cdn": bool(re.search(r"cloudflare|akamai|fastly|cdn|edgecast|cachefly", text)),
+        "mobile": bool(re.search(r"mobile|cellular|wireless|cmcc|chinamobile|移动", text)),
+        "proxy": bool(re.search(r"proxy|vpn|tor|anonymous|privacy|crawler|scraper", text)),
+        "dnsblListed": bool(dnsbl_payload.get("matches")),
+    }
+
+    score = 0
+    tags: list[str] = []
+    if flags["private"] or flags["loopback"] or flags["reserved"]:
+        tags.append("非公网地址")
+    if flags["cdn"]:
+        score += 18
+        tags.append("CDN/边缘网络")
+    if flags["hosting"]:
+        score += 24
+        tags.append("云服务/机房")
+    if flags["proxy"]:
+        score += 34
+        tags.append("疑似代理/VPN/Tor")
+    if flags["mobile"]:
+        score += 4
+        tags.append("移动网络")
+    if flags["dnsblListed"]:
+        score += 42
+        tags.append("命中 DNSBL")
+    if ip.is_global and not tags:
+        tags.append("公网常规网络")
+
+    return {
+        "flags": flags,
+        "score": min(98, score),
+        "tags": tags,
+        "summary": "高关注" if score >= 60 else "建议复核" if score >= 30 else "低风险",
+    }
+
+
+def _probe_target(target: str) -> dict[str, object]:
+    parsed = urlparse(target if "://" in target else f"//{target}")
+    host = (parsed.hostname or target).strip().strip(".")
+    if not host:
+        raise ValueError("missing target")
+    try:
+        _parse_ip(host)
+    except ValueError:
+        if not HOSTNAME_PATTERN.match(host) or ".." in host:
+            raise ValueError("invalid target")
+
+    ports = [443, 80]
+    results: list[dict[str, object]] = []
+    for port in ports:
+        started = time.perf_counter()
+        try:
+            with socket.create_connection((host, port), timeout=PROBE_TIMEOUT_SECONDS):
+                latency_ms = round((time.perf_counter() - started) * 1000, 2)
+                results.append({"port": port, "open": True, "latencyMs": latency_ms})
+        except OSError as exc:
+            latency_ms = round((time.perf_counter() - started) * 1000, 2)
+            results.append({"port": port, "open": False, "latencyMs": latency_ms, "error": str(exc)})
+    return {"target": target, "host": host, "results": results}
+
+
 class LookupHandler(BaseHTTPRequestHandler):
     service = IPGeoSearch()
 
@@ -232,6 +421,22 @@ class LookupHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/dns":
             self._send_dns(parse_qs(parsed.query))
+            return
+
+        if parsed.path == "/rdap":
+            self._send_rdap(parse_qs(parsed.query))
+            return
+
+        if parsed.path == "/reverse-dns":
+            self._send_reverse_dns(parse_qs(parsed.query))
+            return
+
+        if parsed.path == "/intel":
+            self._send_intel(parse_qs(parsed.query))
+            return
+
+        if parsed.path == "/probe":
+            self._send_probe(parse_qs(parsed.query))
             return
 
         if parsed.path == "/map-config":
@@ -365,6 +570,78 @@ class LookupHandler(BaseHTTPRequestHandler):
             return
 
         self._send_json(_resolve_dns_records(host))
+
+    def _send_rdap(self, query: dict[str, list[str]]) -> None:
+        ip = query.get("ip", [""])[0]
+        if not ip:
+            self._send_json({"error": "missing ip query parameter"}, status=400)
+            return
+        try:
+            parsed_ip = _parse_ip(ip)
+        except ValueError:
+            self._send_json({"error": "invalid ip"}, status=400)
+            return
+
+        if not parsed_ip.is_global:
+            self._send_json({"ip": str(parsed_ip), "available": False, "reason": "non-global address"})
+            return
+
+        try:
+            payload = _fetch_json(f"https://rdap.org/ip/{parsed_ip}")
+            self._send_json({"ip": str(parsed_ip), "available": True, "rdap": _summarize_rdap(payload)})
+        except urllib.error.HTTPError as exc:
+            self._send_json({"ip": str(parsed_ip), "available": False, "error": f"rdap http {exc.code}"})
+        except Exception as exc:
+            self._send_json({"ip": str(parsed_ip), "available": False, "error": str(exc)})
+
+    def _send_reverse_dns(self, query: dict[str, list[str]]) -> None:
+        ip = query.get("ip", [""])[0]
+        if not ip:
+            self._send_json({"error": "missing ip query parameter"}, status=400)
+            return
+        try:
+            parsed_ip = _parse_ip(ip)
+        except ValueError:
+            self._send_json({"error": "invalid ip"}, status=400)
+            return
+        self._send_json(_reverse_dns(str(parsed_ip)))
+
+    def _send_intel(self, query: dict[str, list[str]]) -> None:
+        ip = query.get("ip", [""])[0]
+        if not ip:
+            self._send_json({"error": "missing ip query parameter"}, status=400)
+            return
+        try:
+            parsed_ip = _parse_ip(ip)
+        except ValueError:
+            self._send_json({"error": "invalid ip"}, status=400)
+            return
+
+        reverse_payload = _reverse_dns(str(parsed_ip))
+        dnsbl_payload = _dnsbl_lookup(parsed_ip)
+        try:
+            lookup_payload = self.service.lookup(str(parsed_ip))
+        except Exception as exc:
+            lookup_payload = {"ip": str(parsed_ip), "results": [], "error": str(exc)}
+
+        self._send_json(
+            {
+                "ip": str(parsed_ip),
+                "reverseDns": reverse_payload,
+                "dnsbl": dnsbl_payload,
+                "privacy": _privacy_intel(parsed_ip, lookup_payload, reverse_payload, dnsbl_payload),
+            }
+        )
+
+    def _send_probe(self, query: dict[str, list[str]]) -> None:
+        target = query.get("target", [""])[0].strip()
+        if not target:
+            self._send_json({"error": "missing target query parameter"}, status=400)
+            return
+        try:
+            self._send_json(_probe_target(target))
+        except Exception as exc:
+            self._send_json({"error": str(exc)}, status=400)
 
     def _send_offline_map_style(self) -> None:
         root = _offline_map_root()

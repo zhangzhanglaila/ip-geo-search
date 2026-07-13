@@ -64,12 +64,18 @@
             ></textarea>
             <div class="tool-actions">
               <button type="button" id="batchButton" class="batch-primary">批量定位</button>
+              <label class="file-action">
+                导入文件
+                <input type="file" id="batchFileInput" accept=".txt,.csv,text/plain,text/csv" />
+              </label>
+              <button type="button" id="retryFailedButton">重试失败</button>
               <button type="button" id="lineToggleButton" aria-pressed="false">连线显示</button>
               <button type="button" id="clearBatchButton">清空</button>
               <button type="button" id="copyBatchButton">复制结果</button>
               <button type="button" id="exportCsvButton">导出 CSV</button>
               <button type="button" id="exportJsonButton">导出 JSON</button>
             </div>
+            <div class="batch-summary" id="batchStats" aria-live="polite"></div>
             <div class="batch-results" id="batchResults" aria-live="polite"></div>
           </div>
         </article>
@@ -130,6 +136,17 @@
         </div>
       </section>
 
+      <section class="panel intel-panel">
+        <header>
+          <span>●</span>
+          <h2>网络情报</h2>
+          <button type="button" class="mini-action" id="copyIntelButton">复制</button>
+        </header>
+        <div class="intel-results" id="intelResults" aria-live="polite">
+          <div class="intel-empty">查询后显示 RDAP、反向 DNS、DNSBL、代理/VPN/机房判断和端口连通性。</div>
+        </div>
+      </section>
+
       <section class="panel map-panel">
         <header><span>●</span><h2>地理位置</h2></header>
         <div class="map-stage" aria-label="IP location map">
@@ -171,6 +188,21 @@
             <strong>DNS 记录</strong>
             <code>GET /dns?host=github.com</code>
             <span>返回 A、AAAA、CNAME、MX、NS 等 DNS 记录。</span>
+          </article>
+          <article>
+            <strong>网络情报</strong>
+            <code>GET /intel?ip=8.8.8.8</code>
+            <span>返回反向 DNS、DNSBL、代理/VPN、CDN、机房和风险判断。</span>
+          </article>
+          <article>
+            <strong>RDAP / WHOIS</strong>
+            <code>GET /rdap?ip=8.8.8.8</code>
+            <span>返回 IP 地址段、机构、国家、联系人和注册事件摘要。</span>
+          </article>
+          <article>
+            <strong>连通性检测</strong>
+            <code>GET /probe?target=github.com</code>
+            <span>检测 80/443 端口可达性和连接耗时。</span>
           </article>
           <article>
             <strong>健康检查</strong>
