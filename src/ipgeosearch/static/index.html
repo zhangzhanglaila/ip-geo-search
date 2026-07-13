@@ -15,7 +15,7 @@
         <span>DNS查询</span>
         <span>网络情报</span>
         <span>连通性检测</span>
-        <button type="button" id="apiKeyButton" class="nav-action">API Key</button>
+        <button type="button" id="apiKeyButton" class="nav-action" title="可选：填写服务端 IPGEOSEARCH_API_KEY 环境变量设置的接口密钥">接口密钥</button>
         <button type="button" id="themeToggleButton" class="theme-toggle" aria-pressed="false">深色</button>
       </div>
     </nav>
@@ -211,6 +211,11 @@
             <strong>连通性检测</strong>
             <code>GET /probe?target=github.com</code>
             <span>检测 80/443 端口可达性和连接耗时。</span>
+          </article>
+          <article>
+            <strong>接口密钥</strong>
+            <code>IPGEOSEARCH_API_KEY=change-me</code>
+            <span>可选功能。只有服务端设置了这个环境变量，页面才需要填写同一个密钥；未设置时不用填。</span>
           </article>
           <article>
             <strong>健康检查</strong>

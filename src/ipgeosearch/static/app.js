@@ -98,14 +98,14 @@ singleModeButton.addEventListener("click", () => setMode("single"));
 batchModeButton.addEventListener("click", () => setMode("batch"));
 apiKeyButton.addEventListener("click", () => {
   const current = localStorage.getItem(API_KEY_STORAGE) || "";
-  const next = window.prompt("输入 API Key；留空并确认可清除。", current);
+  const next = window.prompt("接口密钥是服务端 IPGEOSEARCH_API_KEY 环境变量的值。没有设置这个环境变量就不用填；留空并确认可清除。", current);
   if (next === null) return;
   if (next.trim()) {
     localStorage.setItem(API_KEY_STORAGE, next.trim());
-    mapNote.textContent = "API Key 已保存到当前浏览器。";
+    mapNote.textContent = "接口密钥已保存到当前浏览器。";
   } else {
     localStorage.removeItem(API_KEY_STORAGE);
-    mapNote.textContent = "API Key 已清除。";
+    mapNote.textContent = "接口密钥已清除；未启用服务端密钥时不需要填写。";
   }
 });
 themeToggleButton.addEventListener("click", () => {
