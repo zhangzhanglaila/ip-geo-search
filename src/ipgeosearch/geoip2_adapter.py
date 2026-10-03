@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
-import sys
+import threading
 from pathlib import Path
 from typing import Any
 
+from ._bootstrap import ensure_import_path
 from .models import SourceResult
 
 
 class GeoIp2Adapter:
+    """GeoIP2 MMDB 读取器。
+
+    Reader 懒加载并被多线程共享，创建过程用锁保护。
+    """
+
     def __init__(self, geoip2_python_root: Path, mmdb_path: Path | None) -> None:
         self.geoip2_python_root = geoip2_python_root
         self.mmdb_path = mmdb_path
         self._reader = None
+        self._lock = threading.Lock()
 
     def lookup(self, ip: str) -> SourceResult:
         if self.mmdb_path is None:
@@ -44,25 +51,27 @@ class GeoIp2Adapter:
             return SourceResult(source="geoip2", ok=False, error=str(exc))
 
     def close(self) -> None:
-        if self._reader is not None:
-            self._reader.close()
-            self._reader = None
+        with self._lock:
+            reader, self._reader = self._reader, None
+        if reader is not None:
+            reader.close()
 
     def _get_reader(self) -> object:
-        if self._reader is not None:
+        with self._lock:
+            if self._reader is not None:
+                return self._reader
+
+            src = self.geoip2_python_root / "src"
+            if src.exists():
+                ensure_import_path(src)
+
+            import geoip2.database
+
+            if self.mmdb_path is None or not self.mmdb_path.exists():
+                raise FileNotFoundError(f"GeoIP2 MMDB file not found: {self.mmdb_path}")
+
+            self._reader = geoip2.database.Reader(str(self.mmdb_path))
             return self._reader
-
-        src = self.geoip2_python_root / "src"
-        if src.exists():
-            sys.path.insert(0, str(src))
-
-        import geoip2.database
-
-        if self.mmdb_path is None or not self.mmdb_path.exists():
-            raise FileNotFoundError(f"GeoIP2 MMDB file not found: {self.mmdb_path}")
-
-        self._reader = geoip2.database.Reader(str(self.mmdb_path))
-        return self._reader
 
     def _to_plain(self, value: Any, max_depth: int = 3) -> Any:
         if value is None:
