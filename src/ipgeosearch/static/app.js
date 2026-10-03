@@ -84,6 +84,7 @@ const state = {
   showHeatmap: false,
   autoQuery: false,
   lastBatchRows: [],
+  renderedBatchRows: [],
   lastDns: null,
   lastIntelText: ""
 };
@@ -182,6 +183,7 @@ lineToggleButton.addEventListener("click", () => {
 clearBatchButton.addEventListener("click", () => {
   batchInput.value = "";
   state.lastBatchRows = [];
+  state.renderedBatchRows = [];
   state.markerLayer?.clearLayers();
   renderBatchStats([]);
   renderBatchResults([]);
@@ -242,7 +244,7 @@ copyIntelButton.addEventListener("click", async () => {
 batchResults.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-row-index]");
   if (!button) return;
-  const row = state.lastBatchRows[Number(button.dataset.rowIndex)];
+  const row = state.renderedBatchRows[Number(button.dataset.rowIndex)];
   if (!row?.position) return;
   focusBatchRow(row);
 });
@@ -474,6 +476,7 @@ function renderError(error) {
 }
 
 function renderBatchResults(rows) {
+  state.renderedBatchRows = rows;
   if (!rows.length) {
     batchResults.innerHTML = "";
     return;
