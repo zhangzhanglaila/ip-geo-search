@@ -9,6 +9,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from typing import Any
 
+from . import scoring
 from .config import Paths
 from .geoip2_adapter import GeoIp2Adapter
 from .ip2region_adapter import Ip2RegionAdapter
@@ -76,6 +77,8 @@ class IPGeoSearch:
             "ip_version": parsed.version,
             "results": results,
         }
+        # 类型与风险评分统一在这里产出，前端与 /intel 都直接复用，避免两套规则漂移。
+        payload["risk"] = scoring.classify(parsed, payload)
         self._cache_put(cache_key, payload)
         return deepcopy(payload)
 

@@ -173,6 +173,8 @@ docker run --rm -p 8787:8787 -e IPGEOSEARCH_API_KEY=change-me \
 | `data` | 匹配到的位置、网络、ASN 或坐标数据。 |
 | `error` | 查询模块无法返回数据时的错误信息。 |
 
+除 `results` 之外，响应还包含一个 `risk` 字段：IP 类型判定与风险评分，含 `ipType`、`score`、`level`（`low` / `medium` / `high`）、`summary`、`tags`、`proxyLike`、`serverLike`、`abuseLike`。`/intel` 的 `privacy` 字段与它结构一致，两者由同一套规则产出。
+
 ### 环境
 
 本项目以本地 Python 服务运行（需要 Python 3.10 及以上），前端资源由 `src/ipgeosearch/static` 提供。
@@ -344,6 +346,8 @@ The lookup API returns the queried IP, IP version, and a `results` array. Each i
 | `ok` | Whether the lookup succeeded. |
 | `data` | Matched location, network, ASN, or coordinate data. |
 | `error` | Error message when a lookup module cannot return data. |
+
+Besides `results`, the response carries a `risk` field: the IP type and risk assessment with `ipType`, `score`, `level` (`low` / `medium` / `high`), `summary`, `tags`, `proxyLike`, `serverLike`, and `abuseLike`. The `privacy` field of `/intel` has the same shape and is produced by the same rules.
 
 ### Environment
 

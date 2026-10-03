@@ -19,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from . import scoring
 from .service import IPGeoSearch
 
 
@@ -283,65 +284,6 @@ def _dnsbl_lookup(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> dict[str
     return {"checked": True, "server": dns_server, "matches": matches, "errors": errors}
 
 
-def _network_text(lookup_payload: dict[str, object]) -> str:
-    parts: list[str] = []
-    for result in lookup_payload.get("results", []):
-        if not isinstance(result, dict):
-            continue
-        parts.append(json.dumps(result.get("data", {}), ensure_ascii=False))
-    return " ".join(parts).lower()
-
-
-def _privacy_intel(
-    ip: ipaddress.IPv4Address | ipaddress.IPv6Address,
-    lookup_payload: dict[str, object],
-    reverse_payload: dict[str, object],
-    dnsbl_payload: dict[str, object],
-) -> dict[str, object]:
-    text = " ".join([_network_text(lookup_payload), str(reverse_payload.get("hostname", ""))]).lower()
-    flags = {
-        "private": ip.is_private,
-        "loopback": ip.is_loopback,
-        "reserved": ip.is_reserved,
-        "multicast": ip.is_multicast,
-        "global": ip.is_global,
-        "hosting": bool(re.search(r"cloud|hosting|host|server|data\s*center|datacenter|colo|aws|amazon|google|azure|microsoft|oracle|digitalocean|linode|ovh|aliyun|alibaba|tencent|huawei", text)),
-        "cdn": bool(re.search(r"cloudflare|akamai|fastly|cdn|edgecast|cachefly", text)),
-        "mobile": bool(re.search(r"mobile|cellular|wireless|cmcc|chinamobile|移动", text)),
-        "proxy": bool(re.search(r"proxy|vpn|tor|anonymous|privacy|crawler|scraper", text)),
-        "dnsblListed": bool(dnsbl_payload.get("matches")),
-    }
-
-    score = 0
-    tags: list[str] = []
-    if flags["private"] or flags["loopback"] or flags["reserved"]:
-        tags.append("非公网地址")
-    if flags["cdn"]:
-        score += 18
-        tags.append("CDN/边缘网络")
-    if flags["hosting"]:
-        score += 24
-        tags.append("云服务/机房")
-    if flags["proxy"]:
-        score += 34
-        tags.append("疑似代理/VPN/Tor")
-    if flags["mobile"]:
-        score += 4
-        tags.append("移动网络")
-    if flags["dnsblListed"]:
-        score += 42
-        tags.append("命中 DNSBL")
-    if ip.is_global and not tags:
-        tags.append("公网常规网络")
-
-    return {
-        "flags": flags,
-        "score": min(98, score),
-        "tags": tags,
-        "summary": "高关注" if score >= 60 else "建议复核" if score >= 30 else "低风险",
-    }
-
-
 def _probe_target(target: str) -> dict[str, object]:
     parsed = urlparse(target if "://" in target else f"//{target}")
     host = (parsed.hostname or target).strip().strip(".")
@@ -595,13 +537,19 @@ class LookupHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             lookup_payload = {"ip": str(parsed_ip), "results": [], "error": str(exc)}
 
+        privacy = scoring.classify(
+            parsed_ip,
+            lookup_payload,
+            extra_text=str(reverse_payload.get("hostname", "")),
+            dnsbl_listed=bool(dnsbl_payload.get("matches")),
+        )
         self._send_json(
             {
                 "ip": str(parsed_ip),
                 "lookup": lookup_payload,
                 "reverseDns": reverse_payload,
                 "dnsbl": dnsbl_payload,
-                "privacy": _privacy_intel(parsed_ip, lookup_payload, reverse_payload, dnsbl_payload),
+                "privacy": privacy,
             }
         )
 

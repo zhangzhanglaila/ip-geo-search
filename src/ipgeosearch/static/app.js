@@ -546,7 +546,7 @@ function currentBatchRows() {
   return state.lastBatchRows.filter((row) => {
     if (filter === "located") return Boolean(row.position);
     if (filter === "failed") return Boolean(row.error);
-    if (filter === "highRisk") return Number(row.riskScore) >= 45;
+    if (filter === "highRisk") return row.riskLevel ? row.riskLevel === "high" : Number(row.riskScore) >= 45;
     if (filter === "hosting") return /机房|云服务|CDN|边缘/.test(row.ipType || "");
     return true;
   });
@@ -700,17 +700,18 @@ function intelCard(title, rows) {
 }
 
 function applyIntelRisk(data) {
+  // /intel 的 privacy 与 /lookup 的 risk 出自后端同一个纯函数，
+  // 这里只是用"信息更全"的那一份覆盖（多算了 DNSBL 与反向 DNS 文本）。
   const privacy = data.intel?.privacy;
   if (!privacy) return;
-  if (Number.isFinite(privacy.score)) {
-    data.riskScore = Math.max(Number(data.riskScore) || 0, privacy.score);
-  }
-  data.riskTags = uniqueItems([...(data.riskTags || []), ...(privacy.tags || [])]);
-  data.proxyLike = Boolean(data.proxyLike || privacy.flags?.proxy);
-  data.isServerLike = Boolean(data.isServerLike || privacy.flags?.hosting || privacy.flags?.cdn);
-  data.abuseLike = Boolean(data.abuseLike || privacy.flags?.dnsblListed);
-  if (privacy.flags?.hosting) data.ipType = "云服务 / 机房 IP";
-  if (privacy.flags?.cdn) data.ipType = "CDN / 边缘网络";
+  if (Number.isFinite(privacy.score)) data.riskScore = privacy.score;
+  if (Array.isArray(privacy.tags) && privacy.tags.length) data.riskTags = privacy.tags;
+  if (privacy.level) data.riskLevel = privacy.level;
+  if (privacy.summary) data.riskSummary = privacy.summary;
+  if (privacy.ipType) data.ipType = privacy.ipType;
+  data.proxyLike = Boolean(privacy.proxyLike ?? privacy.flags?.proxy);
+  data.isServerLike = Boolean(privacy.serverLike ?? privacy.flags?.hosting ?? privacy.flags?.cdn);
+  data.abuseLike = Boolean(privacy.abuseLike ?? privacy.flags?.dnsblListed);
 }
 
 function updateMap(lat, lon, popupHtml, label) {
@@ -880,7 +881,8 @@ function normalize(payload) {
   const location = [country, province, city].filter(Boolean).join("/");
   const carrier = isp || network.name;
   const locationDetail = [location, carrier].filter(Boolean).join("/");
-  const profile = classifyIp({ carrier, isp, networkName: network.name, asn: network.asn });
+  // 类型与风险评分由后端统一给出（见 scoring.py），前端不再自行判断。
+  const risk = payload.risk || {};
 
   return {
     ip: payload.ip,
@@ -891,12 +893,14 @@ function normalize(payload) {
     networkName: network.name,
     countryCode,
     countryName: centroid?.label || country,
-    ipType: profile.type,
-    riskScore: profile.score,
-    riskTags: profile.tags,
-    isServerLike: profile.serverLike,
-    isProxyLike: profile.proxyLike,
-    isAbuseLike: profile.abuseLike,
+    ipType: risk.ipType || (network.asn ? "商业 IP" : "未知"),
+    riskScore: Number.isFinite(risk.score) ? risk.score : 0,
+    riskLevel: risk.level || "",
+    riskSummary: risk.summary || "",
+    riskTags: Array.isArray(risk.tags) ? risk.tags : [],
+    isServerLike: Boolean(risk.serverLike),
+    isProxyLike: Boolean(risk.proxyLike),
+    isAbuseLike: Boolean(risk.abuseLike),
     position,
     coords: position ? `${position.lon.toFixed(6)}, ${position.lat.toFixed(6)}` : "",
     mapLabel: position
@@ -915,6 +919,8 @@ function toBatchRow(input, data) {
     coords: data.coords || "",
     ipType: data.ipType || "",
     riskScore: data.riskScore,
+    riskLevel: data.riskLevel || "",
+    riskSummary: data.riskSummary || "",
     asn: data.asn || "",
     isp: data.isp || data.networkName || "",
     position: data.position || null,
@@ -972,7 +978,7 @@ function renderRisk(data = {}) {
   const score = Number.isFinite(data.riskScore) ? data.riskScore : 0;
   riskScore.textContent = `${score}分`;
   riskNeedle.style.left = `${Math.min(98, score)}%`;
-  riskSummary.textContent = score <= 20 ? "极低风险 - 安全可信" : score <= 45 ? "中低风险 - 建议复核" : "较高风险 - 重点关注";
+  riskSummary.textContent = data.riskSummary || "暂无评估";
   const tags = data.riskTags?.length ? data.riskTags : ["常规网络"];
   riskTags.innerHTML = tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("");
 }
@@ -996,60 +1002,6 @@ function renderAnalysis(data = {}) {
       <td>${statusPill(row[4])}</td>
     </tr>
   `).join("");
-}
-
-function classifyIp(data = {}) {
-  const text = `${data.carrier || ""} ${data.isp || ""} ${data.networkName || ""}`.toLowerCase();
-  const tags = [];
-  let score = 0;
-  let type = data.asn ? "商业 IP" : "未知";
-  let serverLike = false;
-  let proxyLike = false;
-  let abuseLike = false;
-
-  if (/cloudflare|akamai|fastly|cdn|edgecast|cachefly/.test(text)) {
-    type = "CDN / 边缘网络";
-    tags.push("CDN 网络");
-    serverLike = true;
-    score += 18;
-  } else if (/cloud|hosting|host|server|data center|datacenter|colo|amazon|aws|google|microsoft|azure|oracle|digitalocean|linode|ovh|aliyun|alibaba|tencent|huawei/.test(text)) {
-    type = "云服务 / 机房 IP";
-    tags.push("云服务或机房");
-    serverLike = true;
-    score += 24;
-  } else if (/mobile|cmcc|chinamobile|移动|cellular|wireless/.test(text)) {
-    type = "移动网络";
-    tags.push("移动网络");
-    score += 4;
-  } else if (/telecom|unicom|broadband|宽带|电信|联通|cable|fiber|dsl/.test(text)) {
-    type = "宽带网络";
-    tags.push("宽带网络");
-    score += 2;
-  }
-
-  if (/vpn|proxy|tor|anonymous|privacy|crawler|scraper/.test(text)) {
-    tags.push("疑似代理/VPN");
-    proxyLike = true;
-    score += 34;
-  }
-
-  if (/abuse|spam|blacklist|malware|botnet/.test(text)) {
-    tags.push("疑似滥用风险");
-    abuseLike = true;
-    score += 30;
-  }
-
-  if (data.asn) tags.push(`ASN${data.asn}`);
-  if (!tags.length) tags.push("常规网络");
-
-  return {
-    type,
-    score: Math.min(95, score),
-    tags: uniqueItems(tags),
-    serverLike,
-    proxyLike,
-    abuseLike
-  };
 }
 
 function statusPill(value) {
