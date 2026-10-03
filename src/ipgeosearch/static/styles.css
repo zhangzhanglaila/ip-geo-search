@@ -919,31 +919,25 @@ body.theme-dark {
   overflow-wrap: anywhere;
 }
 
-.leaflet-container {
-  font-family: inherit;
-}
-
-.map-label-tooltip {
-  max-width: 260px;
-  white-space: normal;
-  border: 2px solid var(--outline);
-  border-radius: 8px;
-  color: var(--outline);
-  background: #fffdf7;
-  box-shadow: 3px 3px 0 rgba(38, 50, 79, 0.18);
-  font-weight: 950;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-  text-align: center;
-}
-
 .map-popup {
   display: grid;
   gap: 6px;
   min-width: 210px;
+  padding: 12px 14px;
+  border: 2px solid var(--outline);
+  border-radius: 10px;
+  background: #fffdf7;
+  box-shadow: 4px 4px 0 rgba(38, 50, 79, 0.18);
   color: #25304a;
   font-size: 13px;
   font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+body.theme-dark .map-popup {
+  border-color: var(--line);
+  background: #141c2e;
+  color: var(--ink);
 }
 
 .map-popup strong {

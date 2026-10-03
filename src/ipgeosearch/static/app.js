@@ -46,15 +46,35 @@ const THEME_KEY = "ipgeosearch.theme";
 const API_KEY_STORAGE = "ipgeosearch.apiKey";
 const MAX_HISTORY = 8;
 const BATCH_CONCURRENCY = 4;
-const MAP_POPUP_OPTIONS = { autoPan: false, keepInView: false };
-const MAP_LABEL_OPTIONS = {
-  permanent: true,
-  direction: "top",
-  offset: [0, -18],
-  className: "map-label-tooltip"
+const MAP_PROVIDER = "tencent";
+const MAP_SDK_BASE = "https://map.qq.com/api/gljs?v=1.exp&libraries=visualization&key=";
+const MAP_DEFAULT_CENTER = { lat: 30.65, lon: 114.32 };
+const MAP_DEFAULT_ZOOM = 7;
+const MAP_FIT_MAX_ZOOM = 8;
+// 腾讯地图使用 GCJ-02，标注图标用内联 SVG，避免依赖外部图片资源。
+const MAP_MARKER_ICON = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="26" height="34" viewBox="0 0 26 34">'
+  + '<path d="M13 1C6.4 1 1 6.4 1 13c0 8.6 12 20 12 20s12-11.4 12-20c0-6.6-5.4-12-12-12z" fill="#ff4f9a" stroke="#ffffff" stroke-width="2"/>'
+  + '<circle cx="13" cy="13" r="4.6" fill="#ffffff"/></svg>'
+)}`;
+const MAP_HEAT_GRADIENT = {
+  0.2: "#30d5c8",
+  0.45: "#ffd95a",
+  0.7: "#ff7ab6",
+  1: "#ff4f5e"
 };
-const MAP_WORLD_COPY_OFFSETS = [-1440, -1080, -720, -360, 0, 360, 720, 1080, 1440];
 const limitBatchRequest = createLimiter(BATCH_CONCURRENCY);
+
+// 地图状态统一放在一处：腾讯地图 GL JS 的图层对象与 Leaflet 不同，
+// 标注/连线/热力各自是独立的图层实例。
+const mapView = {
+  map: null,
+  markers: null,
+  lines: null,
+  heat: null,
+  info: null,
+  ready: false
+};
 
 const COUNTRY_CENTROIDS = {
   US: { lat: 39.5, lon: -98.35, label: "United States" },
@@ -75,10 +95,6 @@ const COUNTRY_CENTROIDS = {
 
 const state = {
   mode: "single",
-  map: null,
-  marker: null,
-  markerLayer: null,
-  heatLayer: null,
   chinaCoordinates: new Map(),
   chinaCoordinatesReady: null,
   mapReady: null,
@@ -186,7 +202,7 @@ clearBatchButton.addEventListener("click", () => {
   batchInput.value = "";
   state.lastBatchRows = [];
   state.renderedBatchRows = [];
-  state.markerLayer?.clearLayers();
+  clearMapLayers();
   renderBatchStats([]);
   renderBatchResults([]);
 });
@@ -421,29 +437,177 @@ async function lookupTargetRows(target) {
   }));
 }
 
+async function fetchMapConfig() {
+  const response = await apiFetch("/map-config");
+  if (!response.ok) return { provider: MAP_PROVIDER, key: "" };
+  return response.json();
+}
 async function initMap() {
   try {
-    loadStyle("https://unpkg.com/leaflet@1.9.4/dist/leaflet.css");
-    await loadScript("https://unpkg.com/leaflet@1.9.4/dist/leaflet.js");
-    loadScript("https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js").catch((error) => {
-      console.warn("Leaflet heat failed to load", error);
+    const config = await fetchMapConfig();
+    if (!config.key) {
+      mapNote.textContent = "未配置腾讯地图密钥：请在服务端申请 Key 并设置 IPGEOSEARCH_TMAP_KEY 后重启。";
+      return;
+    }
+    await loadScript(`${MAP_SDK_BASE}${encodeURIComponent(config.key)}`);
+    if (typeof window.TMap === "undefined") throw new Error("腾讯地图 SDK 未能初始化");
+
+    mapView.map = new TMap.Map("mapCanvas", {
+      center: new TMap.LatLng(MAP_DEFAULT_CENTER.lat, MAP_DEFAULT_CENTER.lon),
+      zoom: MAP_DEFAULT_ZOOM
     });
-    state.map = L.map("mapCanvas", {
-      center: [30.65, 114.32],
-      zoom: 7,
-      zoomControl: true,
-      attributionControl: false,
-      worldCopyJump: true
+    mapView.markers = new TMap.MultiMarker({
+      id: "ipgeo-markers",
+      map: mapView.map,
+      styles: {
+        point: new TMap.MarkerStyle({
+          width: 26,
+          height: 34,
+          anchor: { x: 13, y: 34 },
+          src: MAP_MARKER_ICON,
+          direction: "top",
+          offset: { x: 0, y: -6 },
+          color: "#25304a",
+          size: 12,
+          backgroundColor: "rgba(255, 253, 247, 0.94)",
+          padding: "4px 8px",
+          backgroundBorderRadius: 8
+        })
+      },
+      geometries: []
     });
-    L.tileLayer("https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}", {
-      subdomains: ["1", "2", "3", "4"],
-      minZoom: 3,
-      maxZoom: 18
-    }).addTo(state.map);
-    state.markerLayer = L.layerGroup().addTo(state.map);
+    mapView.lines = new TMap.MultiPolyline({
+      id: "ipgeo-route",
+      map: mapView.map,
+      styles: {
+        route: new TMap.PolylineStyle({
+          color: "#ff4f9a",
+          width: 4,
+          borderWidth: 1,
+          borderColor: "#ffffff",
+          lineCap: "round"
+        })
+      },
+      geometries: []
+    });
+    mapView.info = new TMap.InfoWindow({
+      map: mapView.map,
+      position: new TMap.LatLng(MAP_DEFAULT_CENTER.lat, MAP_DEFAULT_CENTER.lon),
+      content: "",
+      enableCustom: true,
+      offset: { x: 0, y: -38 }
+    });
+    mapView.markers.on("click", (event) => {
+      const geometry = event?.geometry;
+      if (geometry?.properties?.popup) {
+        openMapPopup(geometry.position, geometry.properties.popup);
+      }
+    });
+    mapView.ready = true;
     mapNote.textContent = "查询 IP 后在地图中定位。";
   } catch (error) {
     mapNote.textContent = `地图加载失败：${error.message}`;
+  }
+}
+
+function mapAvailable() {
+  return Boolean(mapView.ready && mapView.map);
+}
+
+function clearMapLayers() {
+  mapView.markers?.setGeometries([]);
+  mapView.lines?.setGeometries([]);
+  mapView.heat?.hide();
+  mapView.info?.close();
+}
+
+function openMapPopup(position, html) {
+  if (!mapView.info || !position) return;
+  mapView.info.setPosition(position);
+  mapView.info.setContent(html);
+  mapView.info.open();
+}
+
+function markerGeometry(row, index) {
+  const label = row.label || row.inputLabel || row.ip || "IP 位置";
+  return {
+    id: `ip-${index}`,
+    styleId: "point",
+    position: new TMap.LatLng(row.position.lat, row.position.lon),
+    content: label,
+    properties: { popup: row.popup, label }
+  };
+}
+
+function setMapMarkers(entries) {
+  if (!mapAvailable()) return;
+  mapView.markers.setGeometries(entries.map((entry, index) => markerGeometry(entry, index)));
+}
+
+function setRouteLine(points) {
+  if (!mapAvailable()) return;
+  if (points.length < 2) {
+    mapView.lines.setGeometries([]);
+    return;
+  }
+  mapView.lines.setGeometries([
+    {
+      id: "route",
+      styleId: "route",
+      paths: points.map((point) => new TMap.LatLng(point.lat, point.lon))
+    }
+  ]);
+}
+
+function updateHeatLayer(rows) {
+  if (!mapAvailable()) return;
+  if (!state.showHeatmap) {
+    mapView.heat?.hide();
+    return;
+  }
+  const points = rows
+    .filter((row) => row.position)
+    .map((row) => ({ lat: row.position.lat, lng: row.position.lon, count: heatCount(row) }));
+  if (!points.length) {
+    mapView.heat?.hide();
+    return;
+  }
+  if (!mapView.heat) {
+    mapView.heat = new TMap.visualization.Heat({
+      radius: 34,
+      height: 60,
+      opacity: 0.75,
+      min: 0,
+      max: 3,
+      gradientColor: new TMap.GradientColor({ stops: MAP_HEAT_GRADIENT })
+    }).addTo(mapView.map);
+  }
+  mapView.heat.setData(points);
+  mapView.heat.show();
+}
+
+function heatCount(row) {
+  const score = Number(row.riskScore) || 0;
+  return Math.max(1, Math.round(1 + score / 34));
+}
+
+function fitMapToPositions(positions) {
+  if (!mapAvailable() || !positions.length) return;
+  if (positions.length === 1) {
+    mapView.map.setCenter(new TMap.LatLng(positions[0].lat, positions[0].lon));
+    mapView.map.setZoom(MAP_FIT_MAX_ZOOM);
+    return;
+  }
+  const lats = positions.map((point) => point.lat);
+  const lons = positions.map((point) => point.lon);
+  const southWest = new TMap.LatLng(Math.min(...lats), Math.min(...lons));
+  const northEast = new TMap.LatLng(Math.max(...lats), Math.max(...lons));
+  try {
+    mapView.map.fitBounds(new TMap.LatLngBounds(southWest, northEast), { padding: 70, maxZoom: MAP_FIT_MAX_ZOOM });
+  } catch (error) {
+    // 跨越大范围或坐标退化成一条线时，退回"取中点 + 固定级别"。
+    mapView.map.setCenter(new TMap.LatLng(lats[0], lons[0]));
+    mapView.map.setZoom(4);
   }
 }
 
@@ -536,8 +700,8 @@ function renderCurrentBatchView(parsed = null) {
   const locatedRows = rows.filter((row) => row.position);
   if (locatedRows.length) {
     updateMapMany(locatedRows);
-  } else if (state.markerLayer) {
-    state.markerLayer.clearLayers();
+  } else {
+    clearMapLayers();
   }
 }
 
@@ -715,74 +879,27 @@ function applyIntelRisk(data) {
 }
 
 function updateMap(lat, lon, popupHtml, label) {
-  if (!state.map || !window.L) return;
-  state.markerLayer?.clearLayers();
-  const position = [lat, lon];
-  state.marker = addMapMarkerCopies(lat, lon, popupHtml, label || "IP 位置").primaryMarker;
-  state.marker?.openPopup();
-  state.map.setView(position, 8, { animate: false });
+  if (!mapAvailable()) return;
+  const position = { lat, lon };
+  setMapMarkers([{ position, popup: popupHtml, label: label || "IP 位置" }]);
+  fitMapToPositions([position]);
+  openMapPopup(new TMap.LatLng(lat, lon), popupHtml);
 }
 
 function updateMapMany(rows) {
-  if (!state.map || !window.L || !rows.length) return;
-  state.markerLayer?.clearLayers();
-  const bounds = [];
-  const routePoints = [];
-  const groups = groupRowsByPosition(rows);
-  for (const group of groups) {
-    const first = group.rows[0];
-    const position = [first.position.lat, first.position.lon];
-    bounds.push(position);
-    addMapMarkerCopies(first.position.lat, first.position.lon, mapGroupPopupHtml(group.rows), mapGroupMarkerLabel(group.rows));
-  }
-  for (const row of rows) {
-    const position = [row.position.lat, row.position.lon];
-    routePoints.push(position);
-  }
-  if (state.connectBatchPoints && routePoints.length > 1) {
-    addRouteLineCopies(routePoints);
-  }
-  if (state.showHeatmap) {
-    addHeatmapLayer(rows);
-  }
-  if (bounds.length === 1) {
-    state.map.setView(bounds[0], 8, { animate: false });
-  } else {
-    state.map.fitBounds(bounds, { padding: [70, 70], maxZoom: 8, animate: false });
-    state.map.panTo(bounds[0], { animate: false });
-  }
-}
-
-function addHeatmapLayer(rows) {
-  const points = rows
-    .filter((row) => row.position)
-    .map((row) => [row.position.lat, row.position.lon, heatIntensity(row)]);
-  if (!points.length || !state.map || !window.L) return;
-
-  if (typeof L.heatLayer === "function") {
-    L.heatLayer(points, {
-      radius: 34,
-      blur: 24,
-      minOpacity: 0.28,
-      gradient: { 0.2: "#30d5c8", 0.45: "#ffd95a", 0.7: "#ff7ab6", 1: "#ff4f5e" }
-    }).addTo(state.markerLayer || state.map);
-    return;
-  }
-
-  for (const row of rows) {
-    if (!row.position) continue;
-    L.circleMarker([row.position.lat, row.position.lon], {
-      radius: 24 + heatIntensity(row) * 18,
-      stroke: false,
-      fillColor: "#ff4f9a",
-      fillOpacity: 0.22
-    }).addTo(state.markerLayer || state.map);
-  }
-}
-
-function heatIntensity(row) {
-  const score = Number(row.riskScore) || 0;
-  return Math.max(0.35, Math.min(1, 0.35 + score / 100));
+  if (!mapAvailable() || !rows.length) return;
+  const entries = groupRowsByPosition(rows).map((group) => ({
+    position: { lat: group.rows[0].position.lat, lon: group.rows[0].position.lon },
+    popup: mapGroupPopupHtml(group.rows),
+    label: mapGroupMarkerLabel(group.rows)
+  }));
+  setMapMarkers(entries);
+  const routePoints = state.connectBatchPoints
+    ? rows.filter((row) => row.position).map((row) => ({ lat: row.position.lat, lon: row.position.lon }))
+    : [];
+  setRouteLine(routePoints);
+  updateHeatLayer(rows);
+  fitMapToPositions(entries.map((entry) => entry.position));
 }
 
 function groupRowsByPosition(rows) {
@@ -796,44 +913,23 @@ function groupRowsByPosition(rows) {
   return [...groups.values()].map((groupRows) => ({ rows: groupRows }));
 }
 
-function addMapMarkerCopies(lat, lon, popupHtml, label) {
-  let primaryMarker = null;
-  for (const offset of MAP_WORLD_COPY_OFFSETS) {
-    const marker = L.marker([lat, lon + offset])
-      .addTo(state.markerLayer || state.map)
-      .bindPopup(popupHtml, MAP_POPUP_OPTIONS)
-      .bindTooltip(escapeHtml(label || "IP 位置"), MAP_LABEL_OPTIONS);
-    marker.ipGeoPrimaryLon = lon;
-    marker.ipGeoPrimaryLat = lat;
-    if (offset === 0) primaryMarker = marker;
-  }
-  return { primaryMarker };
-}
-
-function addRouteLineCopies(routePoints) {
-  for (const offset of MAP_WORLD_COPY_OFFSETS) {
-    L.polyline(routePoints.map(([lat, lon]) => [lat, lon + offset]), {
-      color: "#ff4f9a",
-      weight: 4,
-      opacity: 0.88,
-      dashArray: "10 8"
-    }).addTo(state.markerLayer || state.map);
-  }
+function latLngOf(position) {
+  if (!position) return null;
+  const lat = typeof position.getLat === "function" ? position.getLat() : position.lat;
+  const lon = typeof position.getLng === "function" ? position.getLng() : position.lng;
+  return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
 }
 
 function focusBatchRow(row) {
-  if (!state.map || !window.L || !row.position) return;
-  const position = [row.position.lat, row.position.lon];
-  state.map.setView(position, 8, { animate: false });
-  state.markerLayer?.eachLayer((layer) => {
-    const point = layer.getLatLng?.();
-    if (!point) return;
-    const primaryLat = layer.ipGeoPrimaryLat ?? point.lat;
-    const primaryLon = layer.ipGeoPrimaryLon ?? point.lng;
-    if (Math.abs(primaryLat - row.position.lat) < 0.000001 && Math.abs(primaryLon - row.position.lon) < 0.000001) {
-      layer.openPopup(point);
-    }
+  if (!mapAvailable() || !row.position) return;
+  const target = { lat: row.position.lat, lon: row.position.lon };
+  mapView.map.setCenter(new TMap.LatLng(target.lat, target.lon));
+  mapView.map.setZoom(MAP_FIT_MAX_ZOOM);
+  const geometry = (mapView.markers?.getGeometries() || []).find((item) => {
+    const point = latLngOf(item.position);
+    return point && Math.abs(point.lat - target.lat) < 1e-6 && Math.abs(point.lon - target.lon) < 1e-6;
   });
+  if (geometry) openMapPopup(geometry.position, geometry.properties?.popup || mapPopupHtml(row));
   mapNote.textContent = `${row.inputLabel || row.ip} - 已在地图中定位。`;
 }
 
@@ -861,6 +957,45 @@ function addTargetToBatchInput(target) {
   mapNote.textContent = `${target} 已加入批量输入框，点击“批量定位”开始查询。`;
 }
 
+// 腾讯地图使用 GCJ-02（国测局坐标）。GeoIP2 等数据源给出的是 WGS-84，
+// 直接把 WGS-84 叠在 GCJ-02 底图上会有数百米偏移，因此在中国境内做一次转换；
+// 境外坐标不受影响（GCJ-02 与 WGS-84 在境外一致）。
+const GCJ_SEMI_MAJOR_AXIS = 6378245.0;
+const GCJ_ECCENTRICITY_SQ = 0.00669342162296594323;
+
+function outsideChina(lat, lon) {
+  return lon < 72.004 || lon > 137.8347 || lat < 0.8293 || lat > 55.8271;
+}
+
+function transformLat(x, y) {
+  let value = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+  value += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0;
+  value += (20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin(y / 3.0 * Math.PI)) * 2.0 / 3.0;
+  value += (160.0 * Math.sin(y / 12.0 * Math.PI) + 320.0 * Math.sin(y * Math.PI / 30.0)) * 2.0 / 3.0;
+  return value;
+}
+
+function transformLon(x, y) {
+  let value = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+  value += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0;
+  value += (20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin(x / 3.0 * Math.PI)) * 2.0 / 3.0;
+  value += (150.0 * Math.sin(x / 12.0 * Math.PI) + 300.0 * Math.sin(x / 30.0 * Math.PI)) * 2.0 / 3.0;
+  return value;
+}
+
+function wgs84ToGcj02(lat, lon) {
+  if (outsideChina(lat, lon)) return { lat, lon };
+  const deltaLat = transformLat(lon - 105.0, lat - 35.0);
+  const deltaLon = transformLon(lon - 105.0, lat - 35.0);
+  const radLat = lat / 180.0 * Math.PI;
+  let magic = Math.sin(radLat);
+  magic = 1 - GCJ_ECCENTRICITY_SQ * magic * magic;
+  const sqrtMagic = Math.sqrt(magic);
+  const offsetLat = (deltaLat * 180.0) / ((GCJ_SEMI_MAJOR_AXIS * (1 - GCJ_ECCENTRICITY_SQ)) / (magic * sqrtMagic) * Math.PI);
+  const offsetLon = (deltaLon * 180.0) / (GCJ_SEMI_MAJOR_AXIS / sqrtMagic * Math.cos(radLat) * Math.PI);
+  return { lat: lat + offsetLat, lon: lon + offsetLon };
+}
+
 function normalize(payload) {
   const locationResult = findResult(payload, "ip2region");
   const tableResult = findResult(payload, "ip-location-db");
@@ -877,7 +1012,10 @@ function normalize(payload) {
   const coordinates = findCoordinates(precisionResult?.data?.record);
   const chinaCoordinate = countryCode === "CN" ? findChinaCoordinate(city, province) : null;
   const centroid = countryCode ? COUNTRY_CENTROIDS[countryCode] : null;
-  const position = coordinates || chinaCoordinate || centroid || null;
+  // china-coordinates.json 本身就是 GCJ-02，GeoIP2 的经纬度需要先转换。
+  const position = coordinates
+    ? wgs84ToGcj02(coordinates.lat, coordinates.lon)
+    : chinaCoordinate || centroid || null;
   const location = [country, province, city].filter(Boolean).join("/");
   const carrier = isp || network.name;
   const locationDetail = [location, carrier].filter(Boolean).join("/");
@@ -1299,14 +1437,6 @@ function loadScript(src) {
     script.onerror = () => reject(new Error(`Cannot load ${src}`));
     document.head.appendChild(script);
   });
-}
-
-function loadStyle(href) {
-  if (document.querySelector(`link[href="${href}"]`)) return;
-  const link = document.createElement("link");
-  link.rel = "stylesheet";
-  link.href = href;
-  document.head.appendChild(link);
 }
 
 function escapeHtml(value) {

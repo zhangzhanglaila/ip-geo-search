@@ -341,6 +341,15 @@ class LookupHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": True})
             return
 
+        if parsed.path == "/map-config":
+            key = os.getenv("IPGEOSEARCH_TMAP_KEY", "")
+            self._send_json({
+                "provider": "tencent",
+                "key": key,
+                "configured": bool(key),
+            })
+            return
+
         if parsed.path == "/datasets":
             self._send_json({"datasets": self.service.available_csv_datasets()})
             return

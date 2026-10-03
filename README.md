@@ -27,7 +27,7 @@ ip-geo-search 是一个本地运行的 IP 与域名地理位置查询工具，�
 | DNS | 支持 A、AAAA、CNAME、MX、NS 记录查询与反向 DNS 查询。 |
 | 归属 | 通过 RDAP / WHOIS 汇总公网 IP 归属与分配信息。 |
 | 情报 | DNSBL 黑名单检查，启发式识别代理、VPN、Tor、CDN、托管、移动网络与私有地址，并对 80/443 端口做 TCP 连通探测。 |
-| 地图 | 在线单点与多点标注、同坐标聚合、批量筛选、可选热力图与顺序连线、丰富弹窗，以及点击结果定位。 |
+| 地图 | 腾讯地图 GL JS 在线底图、单点与多点标注、同坐标聚合、批量筛选、可选热力图与顺序连线、丰富弹窗，以及点击结果定位。 |
 | 历史 | 查询历史支持一键重查、收藏、单条删除与全部清空。 |
 | 批量 | 支持 TXT/CSV 导入、去重、失败重试与结果统计。 |
 | 导出 | 批量结果可导出为 CSV 或 JSON，包含 IP 类型、风险、ASN 与 ISP 字段。 |
@@ -157,10 +157,34 @@ docker run --rm -p 8787:8787 -e IPGEOSEARCH_API_KEY=change-me \
 | `IPGEOSEARCH_IP_LOCATION_DB_ROOT` | ip-location-db 仓库目录，默认 `<DATA_ROOT>/ip-location-db`。 |
 | `IPGEOSEARCH_GEOIP2_PYTHON_ROOT` | GeoIP2-python 仓库目录，默认 `<DATA_ROOT>/GeoIP2-python`。 |
 | `IPGEOSEARCH_GEOIP2_MMDB` | 可选，MaxMind MMDB 文件路径，用于取精确经纬度。 |
+| `IPGEOSEARCH_TMAP_KEY` | 可选，腾讯位置服务 Key（JS API GL）。未设置时页面的地图区域会提示如何配置。 |
 | `IPGEOSEARCH_API_KEY` | 可选，设置后所有接口都要求携带密钥。 |
 | `DNS_SERVER` | 可选，DNS 记录与 DNSBL 查询使用的服务器，默认 `223.5.5.5`。 |
 
 旧变量名（`IP_UNIFIED_WORKSPACE`、`IP2REGION_ROOT`、`IP_LOCATION_DB_ROOT`、`GEOIP2_PYTHON_ROOT`、`GEOIP2_MMDB`）仍然兼容，但建议改用上表的新名字。
+
+### 地图服务
+
+地图使用**腾讯位置服务 JavaScript API GL**（GCJ-02 坐标），不使用 Leaflet、OpenStreetMap 等非白名单方案。
+
+配置步骤：
+
+1. 打开 [腾讯位置服务控制台](https://lbs.qq.com/dev/console/application/mine)，注册账号并创建应用，在应用下**添加 Key**（JavaScript API GL 不需要勾选任何产品）。
+2. 通过环境变量把 Key 交给服务端，不要写进前端代码：
+
+   ```powershell
+   $env:IPGEOSEARCH_TMAP_KEY="你的腾讯地图Key"
+   python api.py --host 127.0.0.1 --port 8787
+   ```
+
+3. 页面通过 `/map-config` 接口取到该 Key 后加载 SDK。未设置时地图区域会显示配置提示，其余功能不受影响。
+
+说明：
+
+- 代码里不硬编码任何地图密钥，也没有可用的内置 Key；Key 只存在于服务端环境变量中。
+- 浏览器地图 SDK 的 Key 必然对客户端可见，请到控制台为该 Key 设置 **Referer 白名单**（例如 `http://127.0.0.1:8787/*`），避免被其他站点盗用。
+- 底图署名由腾讯地图 SDK 保留，请勿关闭。
+- GeoIP2 返回的 WGS-84 经纬度在国内会自动转换为 GCJ-02 后再上图；境外 WGS-84 与 GCJ-02 一致，不做转换。
 
 ### 查询返回
 
@@ -201,7 +225,7 @@ ip-geo-search is a locally-run IP and domain geolocation search tool with a play
 | DNS | A / AAAA / CNAME / MX / NS record lookup and reverse DNS lookup. |
 | Ownership | RDAP / WHOIS summary for public IP ownership and allocation data. |
 | Intelligence | DNSBL blacklist checks; heuristic proxy, VPN, Tor, CDN, hosting, mobile, and private detection; TCP probe on ports 80 and 443. |
-| Map | Online single- and multi-point markers, same-coordinate grouping, batch filters, optional heatmap and order lines, rich popups, and click-to-focus. |
+| Map | Tencent Maps GL JS basemap, single- and multi-point markers, same-coordinate grouping, batch filters, optional heatmap and order lines, rich popups, and click-to-focus. |
 | History | Query history with one-click re-query, favorites, item deletion, and clear-all. |
 | Batch | TXT/CSV import, duplicate removal, failure retry, and result summary. |
 | Export | Export batch results to CSV or JSON with IP type, risk, ASN, and ISP fields. |
@@ -331,10 +355,34 @@ Mounting only the sources you need is supported: an unmounted source reports an 
 | `IPGEOSEARCH_IP_LOCATION_DB_ROOT` | ip-location-db repository. Defaults to `<DATA_ROOT>/ip-location-db`. |
 | `IPGEOSEARCH_GEOIP2_PYTHON_ROOT` | GeoIP2-python repository. Defaults to `<DATA_ROOT>/GeoIP2-python`. |
 | `IPGEOSEARCH_GEOIP2_MMDB` | Optional MaxMind MMDB file used for precise coordinates. |
+| `IPGEOSEARCH_TMAP_KEY` | Optional Tencent Location Service key (JS API GL). When unset, the map area explains how to configure it. |
 | `IPGEOSEARCH_API_KEY` | Optional. When set, every endpoint requires the key. |
 | `DNS_SERVER` | Optional DNS server used for record and DNSBL lookups. Defaults to `223.5.5.5`. |
 
 The previous names (`IP_UNIFIED_WORKSPACE`, `IP2REGION_ROOT`, `IP_LOCATION_DB_ROOT`, `GEOIP2_PYTHON_ROOT`, `GEOIP2_MMDB`) still work, but the new names above are preferred.
+
+### Map Service
+
+The map uses **Tencent Location Service JavaScript API GL** (GCJ-02 coordinates). Leaflet, OpenStreetMap, and other non-whitelisted basemaps are not used.
+
+Setup:
+
+1. Sign in to the [Tencent Location Service console](https://lbs.qq.com/dev/console/application/mine), create an application, and **add a Key** under it (JavaScript API GL needs no product selection).
+2. Pass the key to the server through an environment variable — never put it in front-end code:
+
+   ```powershell
+   $env:IPGEOSEARCH_TMAP_KEY="your-tencent-map-key"
+   python api.py --host 127.0.0.1 --port 8787
+   ```
+
+3. The page fetches the key from `/map-config` and then loads the SDK. When no key is set, the map area shows setup instructions and everything else keeps working.
+
+Notes:
+
+- No map key is hardcoded anywhere and no usable key ships with the project; the key only lives in the server environment.
+- A browser map SDK key is necessarily visible to clients. Set a **Referer whitelist** for that key in the console (for example `http://127.0.0.1:8787/*`) so other sites cannot reuse it.
+- The basemap attribution is provided by the Tencent Maps SDK and must stay enabled.
+- WGS-84 coordinates from GeoIP2 are converted to GCJ-02 before plotting inside China; outside China WGS-84 and GCJ-02 coincide and no conversion is applied.
 
 ### Lookup Response
 
