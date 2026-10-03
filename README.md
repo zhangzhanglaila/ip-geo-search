@@ -203,6 +203,19 @@ docker run --rm -p 8787:8787 -e IPGEOSEARCH_API_KEY=change-me \
 
 本项目以本地 Python 服务运行（需要 Python 3.10 及以上），前端资源由 `src/ipgeosearch/static` 提供。
 
+### 开发
+
+安装开发依赖并运行检查：
+
+```powershell
+pip install -e ".[dev]"
+ruff check .
+ruff format --check .
+pytest
+```
+
+测试覆盖手写 DNS 报文编解码、风险评分规则、CSV 区间索引与缓存、静态文件路径校验、配置解析，以及真实启动服务的 HTTP 接口集成用例；测试不需要任何数据仓库，全部离线运行。以上三项检查由 `.github/workflows/ci.yml` 在每次 push 与 PR 时自动执行。
+
 ### 规划
 
 - 可选的桌面端打包构建。
@@ -400,6 +413,19 @@ Besides `results`, the response carries a `risk` field: the IP type and risk ass
 ### Environment
 
 The project runs as a local Python service (requires Python 3.10+) and serves the frontend from `src/ipgeosearch/static`.
+
+### Development
+
+Install the dev extras and run the checks:
+
+```powershell
+pip install -e ".[dev]"
+ruff check .
+ruff format --check .
+pytest
+```
+
+The suite covers the hand-written DNS message codec, risk scoring rules, the CSV range index and its cache, static file path validation, configuration parsing, and HTTP API integration tests against a real server. No data repositories are required — everything runs offline. All three checks run automatically on every push and pull request via `.github/workflows/ci.yml`.
 
 ### Roadmap
 
