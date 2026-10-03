@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from .service import IPGeoSearch
 
@@ -377,8 +377,12 @@ class LookupHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path.startswith("/static/"):
-            relative_path = parsed.path.removeprefix("/static/")
-            self._send_file(STATIC_ROOT.joinpath(*relative_path.split("/")))
+            relative_path = unquote(parsed.path).removeprefix("/static/")
+            parts = [part for part in relative_path.split("/") if part not in ("", ".")]
+            if not parts or ".." in parts or "\\" in relative_path:
+                self._send_json({"error": "not found"}, status=404)
+                return
+            self._send_file(STATIC_ROOT.joinpath(*parts))
             return
 
         query = parse_qs(parsed.query)
@@ -473,7 +477,7 @@ class LookupHandler(BaseHTTPRequestHandler):
     def _send_file(self, path: Path) -> None:
         try:
             resolved = path.resolve()
-            if not str(resolved).startswith(str(STATIC_ROOT.resolve())):
+            if not resolved.is_relative_to(STATIC_ROOT.resolve()):
                 self._send_json({"error": "not found"}, status=404)
                 return
             if not resolved.is_file():
