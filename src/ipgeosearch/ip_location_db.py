@@ -8,12 +8,12 @@ import threading
 from array import array
 from bisect import bisect_right
 from collections import OrderedDict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from .models import SourceResult
-
 
 RANGE_FIELD_START = "ip_range_start"
 RANGE_FIELD_END = "ip_range_end"
@@ -58,7 +58,7 @@ def int_to_ip(value: int) -> str:
 
 
 def _is_sorted(values: Sequence[int]) -> bool:
-    return all(left <= right for left, right in zip(values, values[1:]))
+    return all(left <= right for left, right in zip(values, values[1:], strict=False))
 
 
 def _to_column(values: list[int], use_array: bool) -> list[int] | array:
@@ -88,7 +88,7 @@ class CsvIndex:
             RANGE_FIELD_START: int_to_ip(self.starts[index]),
             RANGE_FIELD_END: int_to_ip(self.ends[index]),
         }
-        result.update(zip(self.fields, self.rows[index]))
+        result.update(zip(self.fields, self.rows[index], strict=True))
         return result
 
 
@@ -110,9 +110,7 @@ class IpLocationDb:
         except Exception as exc:
             return SourceResult(source="ip-location-db", ok=False, error=str(exc))
 
-    def lookup_dataset(
-        self, ip: ipaddress.IPv4Address | ipaddress.IPv6Address, dataset: str
-    ) -> dict[str, Any] | None:
+    def lookup_dataset(self, ip: ipaddress.IPv4Address | ipaddress.IPv6Address, dataset: str) -> dict[str, Any] | None:
         return self._find(dataset, ip.version, int(ip))
 
     def available_datasets(self) -> list[str]:
@@ -122,9 +120,7 @@ class IpLocationDb:
         for child in sorted(self.root.iterdir()):
             if not child.is_dir():
                 continue
-            if (child / f"{child.name}-ipv4.csv").exists() or (
-                child / f"{child.name}-ipv6.csv"
-            ).exists():
+            if (child / f"{child.name}-ipv4.csv").exists() or (child / f"{child.name}-ipv6.csv").exists():
                 datasets.append(child.name)
         return datasets
 
@@ -177,7 +173,8 @@ class IpLocationDb:
                     continue
                 starts.append(ip_to_int(values[0]))
                 ends.append(ip_to_int(values[1]))
-                rows.append(tuple(values[2 : 2 + width]))
+                # 列数不足时补空串，保持与旧实现一致的输出结构（字段总是齐全）。
+                rows.append(tuple(values[2 : 2 + width] + [""] * max(0, width - (len(values) - 2))))
 
         if not _is_sorted(starts):
             order = sorted(range(len(starts)), key=starts.__getitem__)

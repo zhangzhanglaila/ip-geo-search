@@ -7,6 +7,7 @@ dependencies = []
 
 [project.optional-dependencies]
 geoip2 = ["geoip2>=5.0.0"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.scripts]
 ip-geo-search = "ipgeosearch.cli:main"
@@ -18,3 +19,26 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+ipgeosearch = ["static/*", "static/assets/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ipgeosearch"]
+
+[tool.ruff.lint.per-file-ignores]
+# 根目录的入口脚本要先把 src/ 塞进 sys.path 才能 import 本地包，
+# 这个顺序是刻意的，不能被 isort 当成乱序导入重排。
+"api.py" = ["I001", "E402"]
+"lookup.py" = ["I001", "E402"]

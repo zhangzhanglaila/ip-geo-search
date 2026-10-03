@@ -22,7 +22,6 @@ from urllib.parse import parse_qs, unquote, urlparse
 from . import scoring
 from .service import IPGeoSearch
 
-
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
 HOSTNAME_PATTERN = re.compile(r"^(?=.{1,253}$)(?!-)[A-Za-z0-9.-]+(?<!-)$")
 DNS_RECORD_TYPES = {
@@ -105,17 +104,11 @@ def _decode_dns_record(message: bytes, record_type: int, rdata_offset: int, rdle
     return ""
 
 
-def _query_dns_server(host: str, record_type: int, dns_server: str) -> list[dict[str, object]]:
-    transaction_id = random.randrange(0, 65536)
-    header = struct.pack("!HHHHHH", transaction_id, 0x0100, 1, 0, 0, 0)
-    question = _encode_dns_name(host) + struct.pack("!HH", record_type, 1)
-    packet = header + question
+def _parse_dns_response(response: bytes, transaction_id: int) -> list[dict[str, object]]:
+    """解析 DNS 响应报文，返回 A/AAAA/CNAME/MX/NS 记录。
 
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
-        client.settimeout(DNS_TIMEOUT_SECONDS)
-        client.sendto(packet, (dns_server, 53))
-        response, _ = client.recvfrom(4096)
-
+    抽成独立函数便于直接用手工构造的报文做测试，不必真的发 UDP 请求。
+    """
     if len(response) < 12:
         raise ValueError("dns response too short")
 
@@ -146,6 +139,20 @@ def _query_dns_server(host: str, record_type: int, dns_server: str) -> list[dict
         if value:
             records.append({"type": record_name, "value": value, "ttl": ttl, "source": "dns"})
     return records
+
+
+def _query_dns_server(host: str, record_type: int, dns_server: str) -> list[dict[str, object]]:
+    transaction_id = random.randrange(0, 65536)
+    header = struct.pack("!HHHHHH", transaction_id, 0x0100, 1, 0, 0, 0)
+    question = _encode_dns_name(host) + struct.pack("!HH", record_type, 1)
+    packet = header + question
+
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+        client.settimeout(DNS_TIMEOUT_SECONDS)
+        client.sendto(packet, (dns_server, 53))
+        response, _ = client.recvfrom(4096)
+
+    return _parse_dns_response(response, transaction_id)
 
 
 def _append_dns_record(records: dict[str, list[dict[str, object]]], record: dict[str, object]) -> None:
@@ -187,6 +194,26 @@ def _resolve_dns_records(host: str) -> dict[str, object]:
         "errors": errors,
         "addresses": sorted({row["value"] for record_type in ("A", "AAAA") for row in records[record_type]}),
     }
+
+
+def resolve_static_path(url_path: str) -> Path | None:
+    """把 /static/... 映射到 STATIC_ROOT 下的真实文件；非法路径返回 None。
+
+    单独抽出来是为了可测试：字符串前缀比较无法区分目录与同前缀的兄弟目录，
+    这里同时做路径段级校验（拒绝 . / .. / 反斜杠）与目录归属判断。
+    """
+    if not url_path.startswith("/static/"):
+        return None
+    relative = unquote(url_path).removeprefix("/static/")
+    parts = [part for part in relative.split("/") if part not in ("", ".")]
+    if not parts or ".." in parts or "\\" in relative:
+        return None
+
+    try:
+        resolved = STATIC_ROOT.joinpath(*parts).resolve()
+    except OSError:
+        return None
+    return resolved if resolved.is_relative_to(STATIC_ROOT.resolve()) else None
 
 
 def _parse_ip(value: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
@@ -293,7 +320,7 @@ def _probe_target(target: str) -> dict[str, object]:
         _parse_ip(host)
     except ValueError:
         if not HOSTNAME_PATTERN.match(host) or ".." in host:
-            raise ValueError("invalid target")
+            raise ValueError("invalid target") from None
 
     ports = [443, 80]
     results: list[dict[str, object]] = []
@@ -319,12 +346,11 @@ class LookupHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path.startswith("/static/"):
-            relative_path = unquote(parsed.path).removeprefix("/static/")
-            parts = [part for part in relative_path.split("/") if part not in ("", ".")]
-            if not parts or ".." in parts or "\\" in relative_path:
+            static_file = resolve_static_path(parsed.path)
+            if static_file is None:
                 self._send_json({"error": "not found"}, status=404)
                 return
-            self._send_file(STATIC_ROOT.joinpath(*parts))
+            self._send_file(static_file)
             return
 
         query = parse_qs(parsed.query)
@@ -343,11 +369,13 @@ class LookupHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/map-config":
             key = os.getenv("IPGEOSEARCH_TMAP_KEY", "")
-            self._send_json({
-                "provider": "tencent",
-                "key": key,
-                "configured": bool(key),
-            })
+            self._send_json(
+                {
+                    "provider": "tencent",
+                    "key": key,
+                    "configured": bool(key),
+                }
+            )
             return
 
         if parsed.path == "/datasets":
@@ -571,6 +599,7 @@ class LookupHandler(BaseHTTPRequestHandler):
             self._send_json(_probe_target(target))
         except Exception as exc:
             self._send_json({"error": str(exc)}, status=400)
+
 
 def _print_data_sources(service: IPGeoSearch) -> None:
     paths = service.paths

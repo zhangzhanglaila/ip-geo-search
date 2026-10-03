@@ -15,7 +15,6 @@ from .geoip2_adapter import GeoIp2Adapter
 from .ip2region_adapter import Ip2RegionAdapter
 from .ip_location_db import IpLocationDb
 
-
 DEFAULT_CSV_DATASETS = ["user-country", "origin-asn"]
 DEFAULT_SOURCES = ["ip2region", "ip-location-db", "geoip2"]
 CACHE_TTL_SECONDS = 60.0

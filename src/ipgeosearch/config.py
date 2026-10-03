@@ -75,19 +75,15 @@ class Paths:
     geoip2_mmdb: Path | None
 
     @classmethod
-    def from_env(cls) -> "Paths":
+    def from_env(cls) -> Paths:
         data_root = _read_env("data_root")
         workspace = Path(data_root).expanduser().resolve() if data_root else _default_workspace()
         geoip2_mmdb = _read_env("geoip2_mmdb")
         return cls(
             workspace=workspace,
             ip2region_root=_resolve(_read_env("ip2region_root"), workspace / IP2REGION_DIR),
-            ip_location_db_root=_resolve(
-                _read_env("ip_location_db_root"), workspace / IP_LOCATION_DB_DIR
-            ),
-            geoip2_python_root=_resolve(
-                _read_env("geoip2_python_root"), workspace / GEOIP2_PYTHON_DIR
-            ),
+            ip_location_db_root=_resolve(_read_env("ip_location_db_root"), workspace / IP_LOCATION_DB_DIR),
+            geoip2_python_root=_resolve(_read_env("geoip2_python_root"), workspace / GEOIP2_PYTHON_DIR),
             geoip2_mmdb=Path(geoip2_mmdb).expanduser().resolve() if geoip2_mmdb else None,
         )
 
@@ -99,8 +95,7 @@ class Paths:
             (
                 "geoip2",
                 self.geoip2_python_root,
-                self.geoip2_python_root.is_dir()
-                or bool(self.geoip2_mmdb and self.geoip2_mmdb.exists()),
+                self.geoip2_python_root.is_dir() or bool(self.geoip2_mmdb and self.geoip2_mmdb.exists()),
             ),
         ]
 
