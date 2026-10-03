@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ipgeosearch.server import STATIC_ROOT, resolve_static_path
+from ipgeosearch.http_app import STATIC_ROOT, resolve_static_path
 
 
 def test_serves_existing_assets():

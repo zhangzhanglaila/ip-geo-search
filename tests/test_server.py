@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from ipgeosearch import http_app
 from ipgeosearch import server as server_module
 from ipgeosearch.config import Paths
 from ipgeosearch.models import SourceResult
@@ -53,14 +54,15 @@ def base_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     service.geoip2 = StubAdapter("geoip2")
 
     # 反向 DNS 与 DNSBL 会走外网，测试里替换成固定结果
+    # （补丁打在 http_app 上，即实际调用点）
     monkeypatch.setattr(
-        server_module,
-        "_reverse_dns",
+        http_app,
+        "reverse_lookup",
         lambda ip: {"ip": ip, "hostname": "dns.example", "aliases": [], "addresses": []},
     )
     monkeypatch.setattr(
-        server_module,
-        "_dnsbl_lookup",
+        http_app,
+        "dnsbl_lookup",
         lambda ip: {"checked": True, "server": "test", "matches": [], "errors": {}},
     )
     monkeypatch.delenv("IPGEOSEARCH_API_KEY", raising=False)
@@ -178,6 +180,42 @@ def test_unknown_path_returns_404(base_url: str):
     assert get_status(base_url, "/nope") == 404
 
 
+def test_security_headers_are_present(base_url: str):
+    with urllib.request.urlopen(f"{base_url}/health", timeout=10) as response:
+        assert response.headers["X-Content-Type-Options"] == "nosniff"
+        assert response.headers["Referrer-Policy"] == "no-referrer"
+        assert response.headers["X-Frame-Options"] == "DENY"
+
+
+def test_static_assets_support_etag_revalidation(base_url: str):
+    request = urllib.request.Request(f"{base_url}/static/app.js")
+    with urllib.request.urlopen(request, timeout=10) as response:
+        etag = response.headers["ETag"]
+        assert etag
+    assert response.headers["Cache-Control"] == "no-cache"
+
+    conditional = urllib.request.Request(f"{base_url}/static/app.js", headers={"If-None-Match": etag})
+    try:
+        with urllib.request.urlopen(conditional, timeout=10) as response:
+            raise AssertionError("应返回 304")
+    except urllib.error.HTTPError as error:
+        assert error.code == 304
+
+
+def test_access_log_can_be_disabled(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
+    """访问日志默认打开，可用 IPGEOSEARCH_ACCESS_LOG=0 关掉。"""
+    handler = object.__new__(server_module.LookupHandler)
+    handler.client_address = ("127.0.0.1", 1234)
+
+    monkeypatch.delenv("IPGEOSEARCH_ACCESS_LOG", raising=False)
+    handler.log_message("GET %s", "/health")
+    assert "GET /health" in capsys.readouterr().err
+
+    monkeypatch.setenv("IPGEOSEARCH_ACCESS_LOG", "0")
+    handler.log_message("GET %s", "/health")
+    assert "GET /health" not in capsys.readouterr().err
+
+
 def test_index_and_static_assets(base_url: str):
     assert get_status(base_url, "/") == 200
     assert get_status(base_url, "/static/app.js") == 200
@@ -220,3 +258,61 @@ def test_auth_config_reports_requirement(base_url: str, monkeypatch: pytest.Monk
     monkeypatch.setenv("IPGEOSEARCH_API_KEY", "secret")
     _, payload = get_json(f"{base_url}/auth-config")
     assert payload == {"apiKeyRequired": True}
+
+
+IP_ENDPOINTS = ("/lookup", "/rdap", "/reverse-dns", "/intel")
+
+
+@pytest.mark.parametrize("path", IP_ENDPOINTS)
+def test_ip_endpoints_share_missing_ip_message(base_url: str, path: str):
+    """P2-1：`?ip=` 型接口共用同一套入参校验，文案也一致。"""
+    status, payload = get_json(f"{base_url}{path}")
+    assert status == 400
+    assert payload["error"] == "missing ip query parameter"
+
+
+@pytest.mark.parametrize("path", IP_ENDPOINTS)
+def test_ip_endpoints_share_invalid_ip_message(base_url: str, path: str):
+    status, payload = get_json(f"{base_url}{path}?ip=nope")
+    assert status == 400
+    assert payload["error"] == "invalid ip"
+
+
+def test_dns_rejects_literal_ip_but_resolve_accepts_it(base_url: str):
+    """`/dns` 只接受域名，`/resolve` 两者都接受 —— 由 host_endpoint 的开关决定。"""
+    status, payload = get_json(f"{base_url}/dns?host=1.2.3.4")
+    assert status == 400
+    assert payload["error"] == "dns query expects a hostname"
+
+    status, payload = get_json(f"{base_url}/resolve?host=1.2.3.4")
+    assert status == 200
+    assert payload == {"host": "1.2.3.4", "addresses": ["1.2.3.4"]}
+
+
+@pytest.mark.parametrize("path", ("/dns", "/resolve"))
+def test_host_endpoints_share_validation(base_url: str, path: str):
+    status, payload = get_json(f"{base_url}{path}")
+    assert status == 400
+    assert payload["error"] == "missing host query parameter"
+
+    status, payload = get_json(f"{base_url}{path}?host=bad..host")
+    assert status == 400
+    assert payload["error"] == "invalid hostname"
+
+
+def test_route_table_covers_every_documented_endpoint():
+    """路由表是唯一入口，避免新增接口只加了方法却忘了注册。"""
+    assert set(server_module.LookupHandler.ROUTES) == {
+        "/health",
+        "/map-config",
+        "/datasets",
+        "/lookup",
+        "/resolve",
+        "/dns",
+        "/rdap",
+        "/reverse-dns",
+        "/intel",
+        "/probe",
+    }
+    for handler_name in server_module.LookupHandler.ROUTES.values():
+        assert callable(getattr(server_module.LookupHandler, handler_name))
