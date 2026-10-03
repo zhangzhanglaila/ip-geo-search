@@ -26,9 +26,9 @@ class GeoIp2Adapter:
         if self.mmdb_path is None:
             return SourceResult(
                 source="geoip2",
-                ok=True,
+                ok=False,
                 data=None,
-                error="GEOIP2_MMDB is not configured",
+                error="IPGEOSEARCH_GEOIP2_MMDB is not configured",
             )
 
         try:
@@ -39,14 +39,14 @@ class GeoIp2Adapter:
                     continue
                 try:
                     response = func(ip)
-                    return SourceResult(
-                        source="geoip2",
-                        ok=True,
-                        data={"method": method, "record": self._to_plain(response, max_depth=4)},
-                    )
                 except Exception:
                     continue
-            return SourceResult(source="geoip2", ok=True, data=None)
+                return SourceResult(
+                    source="geoip2",
+                    ok=True,
+                    data={"method": method, "record": self._to_plain(response, max_depth=4)},
+                )
+            return SourceResult(source="geoip2", ok=False, data=None, error="no matching record in MMDB")
         except Exception as exc:
             return SourceResult(source="geoip2", ok=False, error=str(exc))
 
@@ -61,14 +61,16 @@ class GeoIp2Adapter:
             if self._reader is not None:
                 return self._reader
 
+            # 先确认文件存在再导入依赖：否则"文件缺失"会被报成"模块未安装"，
+            # 排查时容易看错方向。
+            if self.mmdb_path is None or not self.mmdb_path.exists():
+                raise FileNotFoundError(f"GeoIP2 MMDB file not found: {self.mmdb_path}")
+
             src = self.geoip2_python_root / "src"
             if src.exists():
                 ensure_import_path(src)
 
             import geoip2.database
-
-            if self.mmdb_path is None or not self.mmdb_path.exists():
-                raise FileNotFoundError(f"GeoIP2 MMDB file not found: {self.mmdb_path}")
 
             self._reader = geoip2.database.Reader(str(self.mmdb_path))
             return self._reader
