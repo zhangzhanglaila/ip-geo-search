@@ -436,23 +436,20 @@ class LookupHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "missing ip query parameter"}, status=400)
             return
 
-        sources = query.get("source") or None
-        csv_datasets = query.get("csv_db")
-        old_datasets = None
-        if csv_datasets:
-            old_datasets = self.service.csv_datasets
-            self.service.csv_datasets = csv_datasets
-
         try:
-            self._send_json(self.service.lookup(ip, sources=sources))
+            self._send_json(self.service.lookup(ip, **self._lookup_options(query)))
         except Exception as exc:
             self._send_json({"error": str(exc)}, status=400)
-        finally:
-            if old_datasets is not None:
-                self.service.csv_datasets = old_datasets
 
     def log_message(self, format: str, *args: object) -> None:
         return
+
+    def _lookup_options(self, query: dict[str, list[str]]) -> dict[str, list[str] | None]:
+        """把请求里的数据源/数据集参数整理成 service.lookup 的关键字参数。"""
+        return {
+            "sources": query.get("source") or None,
+            "csv_datasets": query.get("csv_db") or None,
+        }
 
     def _requires_auth(self, path: str) -> bool:
         if not os.getenv("IPGEOSEARCH_API_KEY", ""):
@@ -594,13 +591,14 @@ class LookupHandler(BaseHTTPRequestHandler):
         reverse_payload = _reverse_dns(str(parsed_ip))
         dnsbl_payload = _dnsbl_lookup(parsed_ip)
         try:
-            lookup_payload = self.service.lookup(str(parsed_ip))
+            lookup_payload = self.service.lookup(str(parsed_ip), **self._lookup_options(query))
         except Exception as exc:
             lookup_payload = {"ip": str(parsed_ip), "results": [], "error": str(exc)}
 
         self._send_json(
             {
                 "ip": str(parsed_ip),
+                "lookup": lookup_payload,
                 "reverseDns": reverse_payload,
                 "dnsbl": dnsbl_payload,
                 "privacy": _privacy_intel(parsed_ip, lookup_payload, reverse_payload, dnsbl_payload),

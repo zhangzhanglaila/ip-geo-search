@@ -45,6 +45,7 @@ const HISTORY_KEY = "ipgeosearch.history";
 const THEME_KEY = "ipgeosearch.theme";
 const API_KEY_STORAGE = "ipgeosearch.apiKey";
 const MAX_HISTORY = 8;
+const BATCH_CONCURRENCY = 4;
 const MAP_POPUP_OPTIONS = { autoPan: false, keepInView: false };
 const MAP_LABEL_OPTIONS = {
   permanent: true,
@@ -53,6 +54,7 @@ const MAP_LABEL_OPTIONS = {
   className: "map-label-tooltip"
 };
 const MAP_WORLD_COPY_OFFSETS = [-1440, -1080, -720, -360, 0, 360, 720, 1080, 1440];
+const limitBatchRequest = createLimiter(BATCH_CONCURRENCY);
 
 const COUNTRY_CENTROIDS = {
   US: { lat: 39.5, lon: -98.35, label: "United States" },
@@ -287,13 +289,14 @@ function applyTheme(theme) {
 
 async function lookupTarget(target) {
   const resolved = await resolveTarget(target);
-  const result = await lookupIp(resolved.ip, resolved);
   const [dns, intel, rdap, probe] = await Promise.all([
     resolved.resolved ? lookupDns(resolved.input).catch((error) => ({ error: error.message })) : Promise.resolve(null),
     lookupIntel(resolved.ip).catch((error) => ({ error: error.message })),
     lookupRdap(resolved.ip).catch((error) => ({ error: error.message })),
     lookupProbe(resolved.input).catch((error) => ({ error: error.message }))
   ]);
+  const prefetched = intel && Array.isArray(intel.lookup?.results) ? intel.lookup : null;
+  const result = await lookupIp(resolved.ip, resolved, prefetched);
   result.data.dns = dns;
   result.data.intel = intel;
   result.data.rdap = rdap;
@@ -302,10 +305,15 @@ async function lookupTarget(target) {
   return result;
 }
 
-async function lookupIp(ip, resolved = { input: ip, ip, addresses: [ip], resolved: false }) {
+async function fetchLookupPayload(ip) {
   const response = await apiFetch(`/lookup?ip=${encodeURIComponent(ip)}`);
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.error || "查询失败");
+  return payload;
+}
+
+async function lookupIp(ip, resolved = { input: ip, ip, addresses: [ip], resolved: false }, prefetched = null) {
+  const payload = prefetched || await fetchLookupPayload(ip);
   await state.chinaCoordinatesReady;
   const data = normalize(payload);
   data.input = resolved.input;
@@ -399,16 +407,16 @@ async function runBatchLookup() {
 }
 
 async function lookupTargetRows(target) {
-  const resolved = await resolveTarget(target);
+  const resolved = await limitBatchRequest(() => resolveTarget(target));
   const addresses = resolved.resolved ? uniqueItems(resolved.addresses || [resolved.ip]).filter(isIpAddress) : [resolved.ip];
   if (!addresses.length) throw new Error("域名没有可查询的 IP");
   return Promise.all(addresses.map(async (ip) => {
-    const { data } = await lookupIp(ip, {
+    const { data } = await limitBatchRequest(() => lookupIp(ip, {
       input: resolved.input,
       ip,
       addresses,
       resolved: resolved.resolved
-    });
+    }));
     return toBatchRow(target, data);
   }));
 }
@@ -1205,6 +1213,34 @@ async function copyText(text, button) {
     button.textContent = oldText;
     button.classList.remove("copied");
   }, 1200);
+}
+
+function createLimiter(limit) {
+  let active = 0;
+  const waiting = [];
+  function acquire() {
+    if (active < limit) {
+      active += 1;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => waiting.push(resolve));
+  }
+  function release() {
+    active -= 1;
+    const resume = waiting.shift();
+    if (resume) {
+      active += 1;
+      resume();
+    }
+  }
+  return async function run(task) {
+    await acquire();
+    try {
+      return await task();
+    } finally {
+      release();
+    }
+  };
 }
 
 function uniqueItems(items) {

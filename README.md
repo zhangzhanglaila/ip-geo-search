@@ -103,6 +103,10 @@ python lookup.py 8.8.8.8 --source geoip2 --json
 | `/datasets` | 列出可用数据集。 |
 | `/health` | 健康检查。 |
 
+`/lookup` 与 `/intel` 都接受 `source`（可重复，取值 `ip2region`、`ip-location-db`、`csv`、`geoip2`）和 `csv_db`（可重复）参数；不传时使用默认数据源与数据集。
+
+`/intel` 的响应包含 `lookup` 字段，直接复用同一份本地查询结果，调用方不需要再单独请求一次 `/lookup`。结果带 60 秒进程内缓存。
+
 可选 API Key：
 
 ```powershell
@@ -270,6 +274,10 @@ All endpoints are served by `python api.py`. Base URL: `http://127.0.0.1:8787`.
 | `/probe?target=github.com` | TCP connectivity probe. |
 | `/datasets` | List available datasets. |
 | `/health` | Health check. |
+
+Both `/lookup` and `/intel` accept `source` (repeatable: `ip2region`, `ip-location-db`, `csv`, `geoip2`) and `csv_db` (repeatable). Defaults apply when omitted.
+
+The `/intel` response embeds a `lookup` field that reuses the same local lookup result, so callers do not need a separate `/lookup` request. Results are cached in-process for 60 seconds.
 
 Optional API key:
 
