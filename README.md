@@ -39,7 +39,7 @@ ip-geo-search 是一个本地运行的 IP 与域名地理位置查询工具，�
 启动 Web 服务：
 
 ```powershell
-cd D:\ip\ip-geo-search
+cd D:\Code\ip\ip-geo-search
 python api.py --host 127.0.0.1 --port 8787
 ```
 
@@ -114,18 +114,49 @@ python api.py --host 127.0.0.1 --port 8787
 
 ### Docker 部署
 
+镜像内**不包含**数据仓库，需要把 `ip2region`、`ip-location-db`、`GeoIP2-python` 挂载到容器的 `/data` 下。容器启动时会打印每个数据源的可用状态，缺失的数据源会被明确标出。
+
 构建并运行：
 
-```powershell
+```bash
 docker build -t ip-geo-search .
-docker run --rm -p 8787:8787 ip-geo-search
+docker run --rm -p 8787:8787 \
+  -v /path/to/ip2region:/data/ip2region:ro \
+  -v /path/to/ip-location-db:/data/ip-location-db:ro \
+  -v /path/to/GeoIP2-python:/data/GeoIP2-python:ro \
+  ip-geo-search
+```
+
+Windows PowerShell 单行写法（把 `D:\Code\ip` 换成实际的数据仓库父目录）：
+
+```powershell
+docker run --rm -p 8787:8787 -v D:\Code\ip\ip2region:/data/ip2region:ro -v D:\Code\ip\ip-location-db:/data/ip-location-db:ro -v D:\Code\ip\GeoIP2-python:/data/GeoIP2-python:ro ip-geo-search
 ```
 
 带 API Key 保护运行：
 
-```powershell
-docker run --rm -p 8787:8787 -e IPGEOSEARCH_API_KEY=change-me ip-geo-search
+```bash
+docker run --rm -p 8787:8787 -e IPGEOSEARCH_API_KEY=change-me \
+  -v /path/to/ip2region:/data/ip2region:ro \
+  -v /path/to/ip-location-db:/data/ip-location-db:ro \
+  ip-geo-search
 ```
+
+只挂载需要的数据源也可以：未挂载的数据源会在查询结果里返回明确的失败原因，而不是静默返回空结果。镜像以非 root 用户运行，并借助 `/health` 提供健康检查。
+
+### 环境变量
+
+| 变量 | 说明 |
+| --- | --- |
+| `IPGEOSEARCH_DATA_ROOT` | 数据仓库的父目录。默认自动探测：选取真正含有数据仓库的那个目录；容器内为 `/data`。 |
+| `IPGEOSEARCH_IP2REGION_ROOT` | ip2region 仓库目录，默认 `<DATA_ROOT>/ip2region`。 |
+| `IPGEOSEARCH_IP_LOCATION_DB_ROOT` | ip-location-db 仓库目录，默认 `<DATA_ROOT>/ip-location-db`。 |
+| `IPGEOSEARCH_GEOIP2_PYTHON_ROOT` | GeoIP2-python 仓库目录，默认 `<DATA_ROOT>/GeoIP2-python`。 |
+| `IPGEOSEARCH_GEOIP2_MMDB` | 可选，MaxMind MMDB 文件路径，用于取精确经纬度。 |
+| `IPGEOSEARCH_API_KEY` | 可选，设置后所有接口都要求携带密钥。 |
+| `DNS_SERVER` | 可选，DNS 记录与 DNSBL 查询使用的服务器，默认 `223.5.5.5`。 |
+
+旧变量名（`IP_UNIFIED_WORKSPACE`、`IP2REGION_ROOT`、`IP_LOCATION_DB_ROOT`、`GEOIP2_PYTHON_ROOT`、`GEOIP2_MMDB`）仍然兼容，但建议改用上表的新名字。
 
 ### 查询返回
 
@@ -176,7 +207,7 @@ ip-geo-search is a locally-run IP and domain geolocation search tool with a play
 Start the web service:
 
 ```powershell
-cd D:\ip\ip-geo-search
+cd D:\Code\ip\ip-geo-search
 python api.py --host 127.0.0.1 --port 8787
 ```
 
@@ -251,18 +282,49 @@ When enabled, API requests must include `X-API-Key: change-me` or `?api_key=chan
 
 ### Docker
 
+The image does **not** bundle the data repositories. Mount `ip2region`, `ip-location-db`, and `GeoIP2-python` under `/data`. On startup the container prints the availability of every data source and calls out the missing ones.
+
 Build and run:
 
-```powershell
+```bash
 docker build -t ip-geo-search .
-docker run --rm -p 8787:8787 ip-geo-search
+docker run --rm -p 8787:8787 \
+  -v /path/to/ip2region:/data/ip2region:ro \
+  -v /path/to/ip-location-db:/data/ip-location-db:ro \
+  -v /path/to/GeoIP2-python:/data/GeoIP2-python:ro \
+  ip-geo-search
+```
+
+Windows PowerShell one-liner (replace `D:\Code\ip` with the real data parent directory):
+
+```powershell
+docker run --rm -p 8787:8787 -v D:\Code\ip\ip2region:/data/ip2region:ro -v D:\Code\ip\ip-location-db:/data/ip-location-db:ro -v D:\Code\ip\GeoIP2-python:/data/GeoIP2-python:ro ip-geo-search
 ```
 
 Run with API key protection:
 
-```powershell
-docker run --rm -p 8787:8787 -e IPGEOSEARCH_API_KEY=change-me ip-geo-search
+```bash
+docker run --rm -p 8787:8787 -e IPGEOSEARCH_API_KEY=change-me \
+  -v /path/to/ip2region:/data/ip2region:ro \
+  -v /path/to/ip-location-db:/data/ip-location-db:ro \
+  ip-geo-search
 ```
+
+Mounting only the sources you need is supported: an unmounted source reports an explicit failure reason in the result instead of silently returning nothing. The image runs as a non-root user and exposes `/health` as a health check.
+
+### Environment Variables
+
+| Variable | Description |
+| --- | --- |
+| `IPGEOSEARCH_DATA_ROOT` | Parent directory of the data repositories. Auto-detected by default (the first directory that actually contains data repositories); `/data` inside the container. |
+| `IPGEOSEARCH_IP2REGION_ROOT` | ip2region repository. Defaults to `<DATA_ROOT>/ip2region`. |
+| `IPGEOSEARCH_IP_LOCATION_DB_ROOT` | ip-location-db repository. Defaults to `<DATA_ROOT>/ip-location-db`. |
+| `IPGEOSEARCH_GEOIP2_PYTHON_ROOT` | GeoIP2-python repository. Defaults to `<DATA_ROOT>/GeoIP2-python`. |
+| `IPGEOSEARCH_GEOIP2_MMDB` | Optional MaxMind MMDB file used for precise coordinates. |
+| `IPGEOSEARCH_API_KEY` | Optional. When set, every endpoint requires the key. |
+| `DNS_SERVER` | Optional DNS server used for record and DNSBL lookups. Defaults to `223.5.5.5`. |
+
+The previous names (`IP_UNIFIED_WORKSPACE`, `IP2REGION_ROOT`, `IP_LOCATION_DB_ROOT`, `GEOIP2_PYTHON_ROOT`, `GEOIP2_MMDB`) still work, but the new names above are preferred.
 
 ### Lookup Response
 

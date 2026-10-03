@@ -1,4 +1,6 @@
 .git
+docs/
+.workbuddy/
 __pycache__/
 *.py[cod]
 .pytest_cache/

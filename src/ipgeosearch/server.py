@@ -617,14 +617,31 @@ class LookupHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._send_json({"error": str(exc)}, status=400)
 
+def _print_data_sources(service: IPGeoSearch) -> None:
+    paths = service.paths
+    print(f"data root: {paths.workspace}", flush=True)
+    for name, path, ok in paths.availability():
+        print(f"  [{'ok' if ok else 'missing'}] {name}: {path}", flush=True)
+    missing = paths.missing_sources()
+    if missing:
+        print(f"warning: 数据源不可用，相关查询会失败: {', '.join(missing)}", flush=True)
+        print(
+            "        可设置 IPGEOSEARCH_DATA_ROOT 指向数据仓库的父目录，"
+            "或用 IPGEOSEARCH_IP2REGION_ROOT / IPGEOSEARCH_IP_LOCATION_DB_ROOT / "
+            "IPGEOSEARCH_GEOIP2_PYTHON_ROOT 分别指定。",
+            flush=True,
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="IPGeoSearch HTTP API")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8787)
     args = parser.parse_args()
 
+    _print_data_sources(LookupHandler.service)
     server = ThreadingHTTPServer((args.host, args.port), LookupHandler)
-    print(f"listening on http://{args.host}:{args.port}")
+    print(f"listening on http://{args.host}:{args.port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
